@@ -6,7 +6,7 @@
 [![facebook badge](https://img.shields.io/badge/amims71-30302f?style=flat&logo=facebook)](https://www.facebook.com/amims71)
 [![linkedin badge](https://img.shields.io/badge/amims71-30302f?style=flat&logo=linkedin)](https://www.linkedin.com/in/amims71)
 [![twitter badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=twitter)](https://twitter.com/amims71)
-[![youtube badge](https://img.shields.io/badge/@MsItXpress-30302f?style=flat&logo=youtube)](https://www.youtube.com/channel/UCFk3ZFnnl1DmLSq0bpQL-eg)
+[![youtube badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=youtube)](https://www.youtube.com/channel/UCFk3ZFnnl1DmLSq0bpQL-eg)
 <h3>Software Developer & Programmer || Alhamdulillah For Everything!</h3>
 Hi there, This is Amimul Ehshan.  I'm a Backend Web Applications Developer & Programmer.
 
