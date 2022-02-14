@@ -30,7 +30,7 @@ Here are some ideas to get you started:
 class Amimul Ehshan():
     
   def __init__(self):
-    self.name = "Programmer Hasan";
+    self.name = "Amimul Ehshan";
     self.username = "amims71";
     self.location = "Dhaka, Bangladesh";
     self.twitter = "@amims71";
