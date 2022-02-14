@@ -83,7 +83,7 @@ if __name__ == '__main__':
   </a>
 </p>
 
-[![Amimul Ehshan's Activity Graph](https://activity-graph.herokuapp.com/graph?username=amims71&custom_title=amims71's%20Contribution%20Graph&theme=gruvbox&bg_color=282a36&hide_border=true&line=d1a01f&point=c58545)]
+[Amimul Ehshan's Activity Graph](https://activity-graph.herokuapp.com/graph?username=amims71&custom_title=amims71's%20Contribution%20Graph&theme=gruvbox&bg_color=282a36&hide_border=true&line=d1a01f&point=c58545)
 <p></p>
 
 <p align="left"> <a href="https://github.com/amims71"><img src="https://github-profile-trophy.vercel.app/?username=amims71&show_icons=true&theme=dracula" alt="amims71" /></a> </p>
