@@ -46,7 +46,6 @@ if __name__ == '__main__':
 
 <h3 align="left">Connect with me:</h3>
 <p align="left">
-<a href="https://codepen.io/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/codepen.svg" style="color:282a36" alt="amims71" height="20" width="20" /></a>
 <a href="https://dev.to/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/dev-dot-to.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://twitter.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/twitter.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://linkedin.com/in/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/linkedin.svg" alt="amims71" height="20" width="20" /></a>
