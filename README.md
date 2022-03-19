@@ -49,9 +49,8 @@ if __name__ == '__main__':
 <a href="https://twitter.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/twitter.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://linkedin.com/in/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/linkedin.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://stackoverflow.com/users/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/stackoverflow.svg" alt="amims71" height="20" width="20" /></a>
-<a href="https://fb.com/amims71.s" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/facebook.svg" alt="amims71.s" height="20" width="20" /></a>
+<a href="https://fb.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/facebook.svg" alt="amims71.s" height="20" width="20" /></a>
 <a href="https://instagram.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/instagram.svg" alt="amims71" height="20" width="20" /></a>
-<a href="https://dribbble.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/dribbble.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://medium.com/@amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/medium.svg" alt="@amims71" height="20" width="20" /></a>
 <a href="https://www.hackerrank.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/hackerrank.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://codeforces.com/profile/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/codeforces.svg" alt="amims71" height="20" width="20" /></a>
