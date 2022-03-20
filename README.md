@@ -53,7 +53,6 @@ if __name__ == '__main__':
 <a href="https://instagram.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/instagram.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://medium.com/@amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/medium.svg" alt="@amims71" height="20" width="20" /></a>
 <a href="https://www.hackerrank.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/hackerrank.svg" alt="amims71" height="20" width="20" /></a>
-<a href="https://codeforces.com/profile/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/codeforces.svg" alt="amims71" height="20" width="20" /></a>
 <a href="https://www.hackerearth.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/hackerearth.svg" alt="amims71" height="20" width="20" /></a>
 <a href="/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/rss.svg" alt="amims71" height="20" width="20" /></a>
 </p>
