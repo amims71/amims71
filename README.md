@@ -87,11 +87,6 @@ if __name__ == '__main__':
 
 <p></p>
 
-
-
-<a href="https://github.com/amims71">
-  <img align="center" src="https://github-readme-stats.vercel.app/api/top-langs/?username=amims71&theme=dark&hide_langs_below=1&bg_color=282a36" />
-</a>
 <p></p>
 
 <p align="left">
