@@ -17,7 +17,7 @@ Hi there, This is Amimul Ehshan.  I'm a Backend Web Applications Developer & Pro
 
 Here are some ideas to get you started:
 
-- 🔭 I’m currently working on [Blubird Interactive](https://blubirdinteractive.com/).
+- 🔭 I’m currently working in [Blubird Interactive](https://blubirdinteractive.com/).
 - 🌱 I’m currently learning django
 - 💬 Ask me about laravel, php or any tech related stuff .
 - 📫 How to reach me: [Twitter - @amims71](https://twitter.com/amims71))
