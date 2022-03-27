@@ -20,7 +20,7 @@ Here are some ideas to get you started:
 - 🔭 I’m currently working on [Blubird Interactive](https://blubirdinteractive.com/).
 - 🌱 I’m currently learning django
 - 💬 Ask me about laravel, php or any tech related stuff .
-- 📫 How to reach me: [Twitter - @amims71](https://twitter.com/amims71) , [Youtube - @amims71](https://www.youtube.com/channel/UCFk3ZFnnl1DmLSq0bpQL-eg)
+- 📫 How to reach me: [Twitter - @amims71](https://twitter.com/amims71))
 - 😄 Pronouns: He/His
 - ⚡ Fun fact: ...
 -->
