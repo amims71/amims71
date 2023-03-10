@@ -10,10 +10,6 @@ Hi there, This is Amimul Ehshan.  I'm a Backend Web Applications Developer & Pro
 
 
 
-## Find me around the web 🌎:
-- Search on Google : Who is Amimul Ehshan OR Amimul Ehshan, 
-
-
 Here are some ideas to get you started:
 
 - 🔭 I’m currently working in [Blubird Interactive](https://blubirdinteractive.com/).
