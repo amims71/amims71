@@ -3,8 +3,6 @@
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=amims71&label=Views&color=blue&style=plastic" alt="amims71" /> </p>
 
-[![facebook badge](https://img.shields.io/badge/amims71-30302f?style=flat&logo=facebook)](https://www.facebook.com/amims71)
-[![linkedin badge](https://img.shields.io/badge/amims71-30302f?style=flat&logo=linkedin)](https://www.linkedin.com/in/amims71)
 [![twitter badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=twitter)](https://twitter.com/amims71)
 [![youtube badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=youtube)](https://www.youtube.com/channel/UCFk3ZFnnl1DmLSq0bpQL-eg)
 <h3>Software Developer & Programmer</h3>
@@ -46,15 +44,6 @@ if __name__ == '__main__':
 ```
 
 
-<h3 align="left">Connect with me:</h3>
-<p align="left">
-<a href="https://twitter.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/twitter.svg" alt="amims71" height="20" width="20" /></a>
-<a href="https://linkedin.com/in/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/linkedin.svg" alt="amims71" height="20" width="20" /></a>
-<a href="https://stackoverflow.com/users/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/stackoverflow.svg" alt="amims71" height="20" width="20" /></a>
-<a href="https://fb.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/facebook.svg" alt="amims71.s" height="20" width="20" /></a>
-<a href="https://instagram.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/instagram.svg" alt="amims71" height="20" width="20" /></a>
-<a href="https://www.hackerrank.com/amims71" target="blank"><img align="center" src="https://cdn.jsdelivr.net/npm/simple-icons@3.0.1/icons/hackerrank.svg" alt="amims71" height="20" width="20" /></a>
-</p>
 
 <h3 align="left">**Languages & Tools and OS:**  </h3>
 <p align="left"> 
