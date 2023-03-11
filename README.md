@@ -3,7 +3,7 @@
 
 <p align="left"> <img src="https://komarev.com/ghpvc/?username=amims71&label=Views&color=blue&style=plastic" alt="amims71" /> </p>
 
-[![twitter badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=twitter)](https://twitter.com/amims71)
+[![linkedin badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=linkedin)](https://linkedin.com/in/amims71) [![twitter badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=twitter)](https://twitter.com/amims71)
 [![youtube badge](https://img.shields.io/badge/@amims71-30302f?style=flat&logo=youtube)](https://www.youtube.com/channel/UCFk3ZFnnl1DmLSq0bpQL-eg)
 <h3>Software Developer & Programmer</h3>
 Hi there, This is Amimul Ehshan.  I'm a Backend Web Applications Developer & Programmer.
