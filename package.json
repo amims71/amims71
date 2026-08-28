@@ -1,0 +1,15 @@
+{
+  "name": "amims71-profile",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generates the animated terminal-style SVG cards for the github.com/amims71 profile README.",
+  "license": "MIT",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "jimp": "^1.6.1"
+  }
+}
