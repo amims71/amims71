@@ -56,5 +56,15 @@ export async function fetchCalendar({ login = LOGIN, env = process.env, fetchImp
     throw new Error(`Contribution calendar for "${login}" contains no weeks`);
   }
 
+  if (!Number.isFinite(calendar.totalContributions)) {
+    throw new Error(`Malformed contribution calendar for "${login}": totalContributions is not a finite number`);
+  }
+
+  for (let i = 0; i < calendar.weeks.length; i++) {
+    if (!Array.isArray(calendar.weeks[i].contributionDays)) {
+      throw new Error(`Malformed contribution calendar for "${login}": week ${i} missing or malformed contributionDays`);
+    }
+  }
+
   return calendar;
 }

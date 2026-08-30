@@ -111,6 +111,30 @@ test("fetchCalendar rejects when the network call throws", async () => {
   );
 });
 
+test("fetchCalendar rejects when totalContributions is not a finite number", async () => {
+  await assert.rejects(
+    () =>
+      fetchCalendar({
+        env: { GH_TOKEN: "t" },
+        fetchImpl: async () =>
+          jsonResponse({ data: { user: { contributionsCollection: { contributionCalendar: { totalContributions: "five thousand", weeks: [{ contributionDays: [] }] } } } } }),
+      }),
+    /totalContributions|malformed/i
+  );
+});
+
+test("fetchCalendar rejects when a week lacks a contributionDays array", async () => {
+  await assert.rejects(
+    () =>
+      fetchCalendar({
+        env: { GH_TOKEN: "t" },
+        fetchImpl: async () =>
+          jsonResponse({ data: { user: { contributionsCollection: { contributionCalendar: { totalContributions: 5522, weeks: [{}] } } } } }),
+      }),
+    /contributionDays|malformed/i
+  );
+});
+
 // Constraint C3, enforced at the source level: there must be no fallback that
 // invents contribution data the way the reference implementation does.
 test("github.mjs contains no data synthesis of any kind", async () => {
