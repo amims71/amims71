@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { THEME } from "../src/theme.mjs";
-import { GEOM, geometry, buildHeatmapSvg } from "../src/heatmap.mjs";
+import { GEOM, geometry, buildHeatmapSvg, GLIDER_DUR, columnPeaks, probeSchedule, touchOpacity } from "../src/heatmap.mjs";
 import { assertBalancedXml, assertNoHoles } from "./helpers.mjs";
 
 // 53 weeks x 7 days with a deterministic, varied distribution.
@@ -134,5 +134,120 @@ test("buildHeatmapSvg keeps month labels at least 3 cell-steps apart when the wi
       gap >= 3 * step,
       `month labels ${i - 1} and ${i} are only ${gap}px apart (need >= ${3 * step}px = 3 cell-steps)`
     );
+  }
+});
+
+test("GLIDER_DUR is a 17 second round trip", () => {
+  assert.equal(GLIDER_DUR, 17);
+});
+
+test("columnPeaks returns the busiest day of every week", () => {
+  const weeks = [
+    { contributionDays: [
+      { date: "2026-01-01", contributionCount: 1, weekday: 0 },
+      { date: "2026-01-02", contributionCount: 9, weekday: 1 },
+    ] },
+    { contributionDays: [
+      { date: "2026-01-08", contributionCount: 0, weekday: 0 },
+    ] },
+  ];
+  const peaks = columnPeaks(weeks, 9);
+  assert.equal(peaks.length, 2);
+  assert.equal(peaks[0].count, 9);
+  assert.equal(peaks[0].weekday, 1);
+  assert.equal(peaks[0].level, 4);
+  assert.equal(peaks[1].level, 0);
+});
+
+test("probeSchedule emits two strictly ascending keyframes per week", () => {
+  const g = geometry(53);
+  const s = probeSchedule(cal.weeks, 10, g);
+  assert.equal(s.keyTimes.length, 53 * 2);
+  assert.equal(s.y2.length, s.keyTimes.length);
+  assert.equal(s.colors.length, s.keyTimes.length);
+  const nums = s.keyTimes.map(Number);
+  for (let i = 1; i < nums.length; i++) {
+    assert.ok(nums[i] > nums[i - 1], `keyTimes not ascending at ${i}: ${nums[i - 1]} -> ${nums[i]}`);
+  }
+  assert.ok(nums[0] >= 0 && nums[nums.length - 1] <= 1);
+});
+
+test("probeSchedule aims the beam at bright columns and the top row otherwise", () => {
+  const g = geometry(2);
+  const weeks = [
+    { contributionDays: [{ date: "2026-01-01", contributionCount: 10, weekday: 4 }] },
+    { contributionDays: [{ date: "2026-01-08", contributionCount: 1, weekday: 4 }] },
+  ];
+  const s = probeSchedule(weeks, 10, g);
+  // The level-4 column takes a heat colour; the level-1 column takes the accent.
+  assert.ok(s.colors.includes(THEME.heat[4]));
+  assert.ok(s.colors.includes(THEME.cyan));
+});
+
+test("touchOpacity opens and closes at zero and peaks twice", () => {
+  const o = touchOpacity(0.4);
+  assert.equal(Number(o.keyTimes[0]), 0);
+  assert.equal(Number(o.keyTimes[o.keyTimes.length - 1]), 1);
+  assert.equal(o.values[0], 0);
+  assert.equal(o.values[o.values.length - 1], 0);
+  assert.equal(o.values.filter((v) => v === 1).length, 4); // two pulses, two samples each
+  const nums = o.keyTimes.map(Number);
+  for (let i = 1; i < nums.length; i++) assert.ok(nums[i] > nums[i - 1]);
+});
+
+test("touchOpacity stays monotonic at the extremes of the lane", () => {
+  for (const f of [0, 1]) {
+    const nums = touchOpacity(f).keyTimes.map(Number);
+    for (let i = 1; i < nums.length; i++) assert.ok(nums[i] > nums[i - 1], `f=${f} not ascending at ${i}`);
+  }
+});
+
+test("buildHeatmapSvg includes the glider and its dashed lane", () => {
+  const out = svg();
+  assert.match(out, /class="glider"/);
+  assert.match(out, /stroke-dasharray="2 4"/);
+  assert.match(out, /dur="17s"/);
+  assertBalancedXml(out);
+  assertNoHoles(out);
+});
+
+// Correction 2: a renderer that does not execute SMIL falls back to base
+// attribute values. The glider's <animateTransform> has no effect there, so
+// the <g class="glider"> needs its own base `transform` -- matching the
+// animation's first keyframe -- or a static render places the glider (and
+// its whole beam) at the SVG origin, on top of the header. See
+// task-7-brief.md Correction 2 and revealClip in src/card.mjs for the
+// established pattern.
+test("buildHeatmapSvg gives the glider group a base transform for static renderers", () => {
+  const out = svg();
+  const g = geometry(cal.weeks.length);
+  const xStart = GEOM.gridX + 10;
+  const openTag = out.match(/<g class="glider"[^>]*>/);
+  assert.ok(openTag, "glider group not found");
+  assert.match(openTag[0], /transform="/, "glider group has no base transform attribute");
+  assert.ok(
+    openTag[0].includes(`transform="translate(${xStart},${g.laneY})"`),
+    `glider base transform should park it at the lane start: ${openTag[0]}`
+  );
+});
+
+test("buildHeatmapSvg flashes amber markers only on bright peak days", () => {
+  const out = svg();
+  const markers = out.match(/class="peak-marker"/g) || [];
+  assert.ok(markers.length > 0, "no peak markers emitted");
+  assert.ok(markers.length <= 53, "more markers than weeks");
+  assert.ok(out.includes(THEME.amber));
+});
+
+// Correction 3: peak markers are meant to be invisible except during the
+// brief moment the beam tip crosses them. opacity="0" is their correct
+// resting state -- do not apply the static-safety fix used for heat-cells
+// here, or every marker would be permanently lit at rest.
+test("buildHeatmapSvg keeps peak markers hidden at rest (opacity=0 base)", () => {
+  const out = svg();
+  const markerTags = out.match(/<rect class="peak-marker"[^>]*>/g) || [];
+  assert.ok(markerTags.length > 0, "no peak markers emitted");
+  for (const tag of markerTags) {
+    assert.match(tag, /opacity="0"/, `peak-marker should default to hidden: ${tag}`);
   }
 });
