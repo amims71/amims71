@@ -251,3 +251,30 @@ test("buildHeatmapSvg keeps peak markers hidden at rest (opacity=0 base)", () =>
     assert.match(tag, /opacity="0"/, `peak-marker should default to hidden: ${tag}`);
   }
 });
+
+// Review finding 1: buildGlider's cockpit dot used a raw `fill="#ffffff"`
+// literal instead of a THEME colour -- a pure-white pixel is the one element
+// on a green-phosphor card that isn't phosphor, and it violates the binding
+// "palette exact" constraint (every colour must trace back to THEME). This
+// scans every hex literal actually emitted and requires each one to be a
+// known THEME value, so any future raw-hex regression (not just this one)
+// gets caught, not just this specific white.
+test("buildHeatmapSvg uses only palette colours -- no raw hex literals outside THEME", () => {
+  const out = svg();
+  const known = new Set([
+    THEME.bg,
+    THEME.bg2,
+    THEME.green,
+    THEME.fg,
+    THEME.dim,
+    THEME.cyan,
+    THEME.amber,
+    THEME.line,
+    ...THEME.heat,
+  ]);
+  const hexes = out.match(/#[0-9a-fA-F]{3,8}/g) || [];
+  assert.ok(hexes.length > 0, "expected to find colour literals in the output");
+  for (const hex of hexes) {
+    assert.ok(known.has(hex), `colour literal ${hex} is not in THEME`);
+  }
+});

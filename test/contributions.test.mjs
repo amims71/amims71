@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { levelFor, computeStreaks, flattenDays, maxCount } from "../src/contributions.mjs";
+import { levelFor, computeStreaks, flattenDays, intensityScale } from "../src/contributions.mjs";
 
 const day = (date, contributionCount, weekday = 0) => ({ date, contributionCount, weekday });
 
@@ -74,8 +74,38 @@ test("flattenDays concatenates weeks in order", () => {
   assert.deepEqual(flattenDays(weeks).map((d) => d.contributionCount), [1, 2, 3]);
 });
 
-test("maxCount returns the peak, floored at one", () => {
-  assert.equal(maxCount([day("a", 3), day("b", 9), day("c", 1)]), 9);
-  assert.equal(maxCount([day("a", 0)]), 1);
-  assert.equal(maxCount([]), 1);
+// Review finding 2: the spec's original rule (scale = window maximum) means
+// one outlier day drags the whole grid dim -- measured on the real calendar,
+// a single 209-contribution day pushed 61.9% of active days into the dimmest
+// non-empty shade. intensityScale replaces the true max with the 90th
+// percentile of non-zero days (nearest-rank method: index = ceil(0.9*n) - 1
+// into the ascending-sorted non-zero counts), which was measured to spread
+// the four shades far more evenly (imbalance 0.35 vs. 1.21 for the true max).
+// levelFor itself is unchanged -- it just divides by whatever scale it's
+// handed -- so this is purely about what value now flows into it.
+test("intensityScale returns the 90th percentile of non-zero days (hand-computable)", () => {
+  // Non-zero counts 1..10, sorted ascending. Nearest-rank p90 over n=10:
+  // index = ceil(0.9 * 10) - 1 = 8 -> the value 9 (90% of days are <= 9).
+  const days = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((c, i) => day(`d${i}`, c));
+  assert.equal(intensityScale(days), 9);
+});
+
+test("intensityScale returns 1 for an all-zero window", () => {
+  assert.equal(intensityScale([day("a", 0), day("b", 0)]), 1);
+});
+
+test("intensityScale returns 1 for an empty window", () => {
+  assert.equal(intensityScale([]), 1);
+});
+
+test("intensityScale is not dragged up by a single large outlier", () => {
+  // Nine ordinary days (1..9) plus one wild outlier of 209. Nearest-rank p90
+  // over n=10 lands on index 8 -- still 9, the same as the outlier-free case
+  // above -- because the outlier only ever occupies the top rank. The true
+  // maximum (209) would have set the scale to 209 and crushed every ordinary
+  // day into the dimmest shade; the percentile scale ignores it entirely.
+  const days = [1, 2, 3, 4, 5, 6, 7, 8, 9, 209].map((c, i) => day(`d${i}`, c));
+  const scale = intensityScale(days);
+  assert.equal(scale, 9);
+  assert.ok(scale < 209, "outlier should not set the scale");
 });

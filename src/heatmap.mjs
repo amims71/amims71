@@ -1,7 +1,7 @@
 import { THEME } from "./theme.mjs";
 import { formatInt } from "./util.mjs";
 import { PROFILE } from "./content.mjs";
-import { levelFor, flattenDays, maxCount, computeStreaks } from "./contributions.mjs";
+import { levelFor, flattenDays, intensityScale, computeStreaks } from "./contributions.mjs";
 
 export const GEOM = Object.freeze({ cell: 11, gap: 3, gridX: 46, gridY: 74, laneH: 52 });
 
@@ -19,7 +19,7 @@ export function geometry(weekCount) {
 // Seconds for one there-and-back sweep of the glider.
 export const GLIDER_DUR = 17;
 
-export function columnPeaks(weeks, max) {
+export function columnPeaks(weeks, scale) {
   return weeks.map((week, weekIndex) => {
     let best = null;
     for (const d of week.contributionDays) {
@@ -29,7 +29,7 @@ export function columnPeaks(weeks, max) {
       weekIndex,
       weekday: best ? best.weekday : 0,
       count: best ? best.contributionCount : 0,
-      level: best ? levelFor(best.contributionCount, max) : 0,
+      level: best ? levelFor(best.contributionCount, scale) : 0,
     };
   });
 }
@@ -60,9 +60,9 @@ function ascending(times) {
   return out;
 }
 
-export function probeSchedule(weeks, max, { step, laneY, gridW }) {
+export function probeSchedule(weeks, scale, { step, laneY, gridW }) {
   const topY = GEOM.gridY + GEOM.cell / 2;
-  const targets = columnPeaks(weeks, max).map((peak) => {
+  const targets = columnPeaks(weeks, scale).map((peak) => {
     const hit = peak.level >= 3;
     return {
       cx: GEOM.gridX + peak.weekIndex * step + GEOM.cell / 2,
@@ -120,11 +120,11 @@ export function touchOpacity(xFraction) {
   return { keyTimes, values };
 }
 
-function buildGlider(weeks, max, geo) {
+function buildGlider(weeks, scale, geo) {
   const { gridW, laneY } = geo;
   const xStart = GEOM.gridX + 10;
   const xEnd = GEOM.gridX + gridW - 10;
-  const s = probeSchedule(weeks, max, geo);
+  const s = probeSchedule(weeks, scale, geo);
   const kt = s.keyTimes.join(";");
 
   return `
@@ -146,15 +146,15 @@ function buildGlider(weeks, max, geo) {
       <circle cx="-7.5" cy="0" r="2" fill="${THEME.green}"><animate attributeName="opacity" values="0.35;1;0.35" dur="0.9s" repeatCount="indefinite"/></circle>
       <circle cx="7.5" cy="0" r="2" fill="${THEME.green}"><animate attributeName="opacity" values="1;0.35;1" dur="0.9s" repeatCount="indefinite"/></circle>
       <path d="M-9,0 L-3,-5 L3,-5 L9,0 L3,5 L-3,5 Z" fill="${THEME.cyan}" stroke="${THEME.green}" stroke-width="1"/>
-      <circle cx="0" cy="0" r="2.2" fill="#ffffff"/>
+      <circle cx="0" cy="0" r="2.2" fill="${THEME.fg}"/>
     </g>
   </g>`;
 }
 
-function buildPeakMarkers(weeks, max, geo) {
+function buildPeakMarkers(weeks, scale, geo) {
   const { step, gridW } = geo;
   let out = "";
-  for (const peak of columnPeaks(weeks, max)) {
+  for (const peak of columnPeaks(weeks, scale)) {
     if (peak.level < 3) continue;
     const cx = GEOM.gridX + peak.weekIndex * step + GEOM.cell / 2;
     const o = touchOpacity(laneFraction(cx, gridW));
@@ -171,7 +171,7 @@ export function buildHeatmapSvg({ calendar, today }) {
   const t = THEME;
   const weeks = calendar.weeks;
   const days = flattenDays(weeks);
-  const max = maxCount(days);
+  const scale = intensityScale(days);
   const { current, longest } = computeStreaks(days, today);
   const geo = geometry(weeks.length);
   const { step, width, height } = geo;
@@ -202,7 +202,7 @@ export function buildHeatmapSvg({ calendar, today }) {
     }
     for (const d of week.contributionDays) {
       const y = GEOM.gridY + d.weekday * step;
-      const level = levelFor(d.contributionCount, max);
+      const level = levelFor(d.contributionCount, scale);
       // Base attribute is the FINAL value (opacity="1"), and the reveal
       // animation runs from begin="0s" on its own timeline (values/keyTimes)
       // rather than being delayed via `begin`. A renderer that doesn't
@@ -275,8 +275,8 @@ export function buildHeatmapSvg({ calendar, today }) {
   ${months}
   ${dayLabels}
   ${cells}
-  ${buildPeakMarkers(weeks, max, geo)}
-  ${buildGlider(weeks, max, geo)}
+  ${buildPeakMarkers(weeks, scale, geo)}
+  ${buildGlider(weeks, scale, geo)}
   <text x="${legendX}" y="${height - 14}" class="heat-legend">Less</text>
   ${swatches}
   <text x="${legendX + 34 + t.heat.length * 14 + 8}" y="${height - 14}" class="heat-legend">More</text>
