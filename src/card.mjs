@@ -13,7 +13,6 @@ const RIGHT_W = WIDTH - RIGHT_X - 40;
 const LINE_H = 25;
 const TITLE_GAP = 26;
 const SECTION_GAP = 34;
-const CHAR_W = 7.1; // advance width of the 13px monospace face, for dot placement
 
 export function buildSections(totalContributions) {
   return [
@@ -45,7 +44,14 @@ export function buildSections(totalContributions) {
 }
 
 function revealClip(id, x, y, w, h, delay) {
-  return `<clipPath id="${id}"><rect x="${x}" y="${y}" width="0" height="${h}"><animate attributeName="width" from="0" to="${w}" dur="0.4s" begin="${delay}s" fill="freeze" calcMode="spline" keySplines="0.3 0 0.2 1"/></rect></clipPath>`;
+  // Base width is the FINAL width, and the animation starts at 0s (holding at
+  // zero, then wiping) rather than being delayed via `begin`. A renderer that
+  // doesn't execute SMIL falls back to the base attribute values, so a
+  // static/non-animating render must show every row fully revealed, not
+  // clipped to nothing (see task-5-report.md, Finding 1).
+  const dur = delay + 0.4;
+  const holdFrac = (delay / dur).toFixed(4);
+  return `<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"><animate attributeName="width" values="0;0;${w}" keyTimes="0;${holdFrac};1" dur="${dur.toFixed(2)}s" begin="0s" fill="freeze" calcMode="spline" keySplines="0 0 1 1;0.3 0 0.2 1"/></rect></clipPath>`;
 }
 
 function layoutRight(sections) {
@@ -64,11 +70,10 @@ function layoutRight(sections) {
 
     for (const row of section.rows) {
       const id = `rv${i}`;
-      clips += revealClip(id, RIGHT_X, y - 14, RIGHT_W, 20, delay.toFixed(2));
+      clips += revealClip(id, RIGHT_X, y - 14, RIGHT_W, 20, delay);
       body +=
         `<g clip-path="url(#${id})">` +
-        `<text x="${RIGHT_X}" y="${y}" class="kv-label">${row.label}</text>` +
-        `<text x="${(RIGHT_X + row.label.length * CHAR_W).toFixed(1)}" y="${y}" class="kv-dots">${row.dots}</text>` +
+        `<text x="${RIGHT_X}" y="${y}"><tspan class="kv-label">${row.label}</tspan><tspan class="kv-dots">${row.dots}</tspan></text>` +
         `<text x="${RIGHT_X + RIGHT_W}" y="${y}" text-anchor="end" class="kv-value">${row.value}</text>` +
         `</g>`;
       y += LINE_H;

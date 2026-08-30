@@ -102,3 +102,17 @@ test("buildCardSvg escapes markup in dynamic values", () => {
   const out = buildCardSvg({ asciiRows, totalContributions: 1, syncedAt: 'x <b>"y"' });
   assert.ok(!out.includes("<b>"));
 });
+
+test("buildCardSvg keeps reveal-clip rects at full width for static (non-SMIL) renderers", () => {
+  // Regression guard: a base width="0" clip rect would render every row
+  // invisible on a renderer that doesn't execute SMIL animations (see
+  // task-5-report.md, Finding 1). The animation must hold at zero and wipe
+  // to the final width from its own timeline, not gate visibility via the
+  // base attribute value.
+  const out = svg();
+  const revealRects = out.match(/<clipPath id="rv\d+"><rect[^>]*>/g) || [];
+  assert.equal(revealRects.length, 14, "expected one reveal clip per row");
+  for (const tag of revealRects) {
+    assert.ok(!/width="0"/.test(tag), `reveal clip rect starts at zero width: ${tag}`);
+  }
+});
