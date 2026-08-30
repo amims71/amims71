@@ -114,3 +114,25 @@ test("buildHeatmapSvg never emits a heat-cell rect with opacity=\"0\"", () => {
     assert.ok(!/opacity="0"/.test(tag), `heat-cell rect is invisible without SMIL: ${tag}`);
   }
 });
+
+// Regression: the 53-week window can open mid-month (e.g. the real GitHub
+// calendar opens on Aug 30/31), leaving week 0 a one- or two-day stub of the
+// old month immediately followed by a full week already in the next month.
+// The month-label logic emits a label whenever the month changes between
+// weeks, with no minimum-spacing guard, so both week 0 and week 1 emit a
+// label just one grid column (14px) apart and their glyphs collide -- this
+// is the overlap reported in task-6-report.md ("Aug"/"Sep" at x=46/x=60).
+// `cal` (built above) opens on Aug 31, 2025, so it reproduces this exactly.
+test("buildHeatmapSvg keeps month labels at least 3 cell-steps apart when the window opens mid-month", () => {
+  const out = svg();
+  const step = GEOM.cell + GEOM.gap;
+  const xs = [...out.matchAll(/<text x="(\d+(?:\.\d+)?)" y="[^"]*" class="heat-month">/g)].map((m) => Number(m[1]));
+  assert.ok(xs.length >= 2, "expected at least two month labels to compare spacing");
+  for (let i = 1; i < xs.length; i++) {
+    const gap = xs[i] - xs[i - 1];
+    assert.ok(
+      gap >= 3 * step,
+      `month labels ${i - 1} and ${i} are only ${gap}px apart (need >= ${3 * step}px = 3 cell-steps)`
+    );
+  }
+});

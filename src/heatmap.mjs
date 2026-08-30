@@ -22,7 +22,7 @@ export function buildHeatmapSvg({ calendar, today }) {
   const days = flattenDays(weeks);
   const max = maxCount(days);
   const { current, longest } = computeStreaks(days, today);
-  const { step, gridW, width, height } = geometry(weeks.length);
+  const { step, width, height } = geometry(weeks.length);
 
   let cells = "";
   let months = "";
@@ -32,8 +32,18 @@ export function buildHeatmapSvg({ calendar, today }) {
     const x = GEOM.gridX + wi * step;
     const first = week.contributionDays.find((d) => d.date);
     if (first) {
-      const m = new Date(`${first.date}T00:00:00Z`).getUTCMonth();
-      if (m !== lastMonth) {
+      const firstDate = new Date(`${first.date}T00:00:00Z`);
+      const m = firstDate.getUTCMonth();
+      // Week 0 can be a stub: the 53-week window frequently opens mid-month
+      // (the real calendar opens on Aug 30/31), leaving week 0's first day
+      // and week 1's first day in different months just one grid column
+      // apart, so both would emit a label and their glyphs would collide.
+      // Suppress week 0's label unless it is a genuine month start (its
+      // first day falls within the first seven days of the month). Every
+      // later week keeps the existing month !== lastMonth behaviour
+      // untouched, so the real boundary (week 1, here) still gets labelled.
+      const isMidMonthOpeningStub = wi === 0 && firstDate.getUTCDate() > 7;
+      if (m !== lastMonth && !isMidMonthOpeningStub) {
         months += `<text x="${x}" y="${GEOM.gridY - 12}" class="heat-month">${MONTHS[m]}</text>`;
         lastMonth = m;
       }
