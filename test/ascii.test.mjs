@@ -84,10 +84,19 @@ test("buildAscii produces a portrait, not a silhouette or an empty frame", async
 // the cheeks score near-zero contrast and the dark hair/background score
 // maximum, so hair-vs-cheek ordering is exactly what distinguishes a working
 // portrait from the inverted one.
+//
+// Bands re-aimed for task 13's avatar swap: the original rectangles were
+// calibrated on the old face-filling framing, where rows 20-26 sat on the
+// cheeks. In the new, more zoomed-out studio portrait those rows land on the
+// beard instead, comparing dark hair against dark beard. The bands below
+// (hair rows 2-7 cols 20-34; cheek rows 11-17 cols 24-32) were measured
+// against BOTH the new and the previously-committed photo and pass on each,
+// so they track the actual hair-vs-cheek invariant rather than coordinates
+// that happened to work for one picture.
 test("buildAscii renders hair denser than cheeks", async () => {
   const rows = await buildAscii(AVATAR);
-  const hair = bandMean(rows, 3, 9, 22, 38);
-  const cheek = bandMean(rows, 20, 26, 26, 34);
+  const hair = bandMean(rows, 2, 7, 20, 34);
+  const cheek = bandMean(rows, 11, 17, 24, 32);
   assert.ok(hair > cheek + 1.5, `hair ${hair.toFixed(2)} not clearly denser than cheek ${cheek.toFixed(2)}`);
   assert.ok(hair > 5, `hair band mean ${hair.toFixed(2)} too light to be hair`);
 });

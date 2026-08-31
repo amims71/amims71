@@ -19,6 +19,13 @@ const CROP_REF_HEIGHT = 460;
 const MASK_LO = 0.74;
 const MASK_HI = 1.0;
 
+// Density gamma: studio portraits shot against a near-white background get
+// stretched by normalize() until the whole subject (face, hair, shirt) sits
+// in the dark end of the range, mushing features together. Raising (1 - L)
+// to this power thins mid-tones back out so a studio-lit subject doesn't
+// render as a solid mass.
+const DENSITY_GAMMA = 1.8;
+
 export function densityGrid(lumAt, cols = ASCII_COLS, rows = ASCII_ROWS) {
   const cx = (cols - 1) / 2;
   const cy = (rows - 1) * 0.5;
@@ -30,7 +37,7 @@ export function densityGrid(lumAt, cols = ASCII_COLS, rows = ASCII_ROWS) {
       // Density from INVERTED luminance: dark pixels are dense. Not from
       // distance to a corner-averaged background, which inverts this
       // particular photo — see spec §5.2.1.
-      let d = 1 - lumAt(x, y);
+      let d = (1 - lumAt(x, y)) ** DENSITY_GAMMA;
       d *= 1 - smoothstep(MASK_LO, MASK_HI, r);
       row.push(Math.max(0, Math.min(1, d)));
     }
