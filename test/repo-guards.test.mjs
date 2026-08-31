@@ -73,16 +73,26 @@ function escapeRegex(s) {
 // link regardless of the target, so it is scheme-independent by
 // construction. The rest cover the non-inline ways to link: `][` for a
 // reference usage, `<a` for HTML, any `scheme://` for a bare/auto-linked
-// URL under any scheme in any case, and a whitespace- or line-start-
-// prefixed `//` for a bare protocol-relative URL. Do NOT reintroduce a
-// scheme-shaped check here; that is the exact regression this list exists
-// to prevent.
+// URL under any scheme in any case, a whitespace- or line-start-prefixed
+// `//` for a bare protocol-relative URL, and a bare `www.` host for GFM's
+// autolink extension. Do NOT reintroduce a scheme-shaped check here; that
+// is the exact regression this list exists to prevent.
+//
+// The `www.` rule is not a relapse into enumerating syntaxes: it is here
+// because GitHub's own markdown API was asked, and it renders a bare
+// `www.example.com/x` as a live anchor to `http://www.example.com/x`. The
+// same check confirms a bare scheme-less host (`example.com/x`) is NOT
+// linked, so there is deliberately no rule for that -- it would only
+// manufacture false positives. Confirmed-renders-as-a-link is the bar for
+// admitting a rule here; that is also why the unconfirmed split-reference
+// form (`[Name]` newline `[1]` with `[1]: url`) stays unchased.
 const LINK_SYNTAX = [
   [/\]\(/, "inline-link marker `](`"],
   [/\]\[/, "reference-link marker `][`"],
   [/<a\b/i, "HTML anchor tag"],
   [/\b[a-z][a-z0-9+.-]*:\/\//i, "URL scheme"],
   [/(^|\s)\/\//, "protocol-relative URL"],
+  [/(^|\s)www\./i, "bare `www.` autolink host"],
 ];
 
 // Asserts that `name` is never linked, keyed on link syntax rather than on
@@ -358,6 +368,32 @@ test("private-project link guard rejects an unclosed HTML anchor", () => {
     "",
   ].join("\n");
   assert.throws(() => assertNeverLinked("XP Track", md), /unbalanced HTML anchors/);
+});
+
+test("private-project link guard rejects a bare www. autolink host", () => {
+  // GFM's autolink extension turns a bare `www.` host into a live link with
+  // no bracket syntax and no scheme at all -- confirmed against GitHub's own
+  // markdown API, which renders `www.example.com/xp-track` as an anchor to
+  // `http://www.example.com/xp-track`. So this really would put a clickable
+  // link to private work on the profile page.
+  const md = "**XP Track** `[private]` see www.example.com/xp-track\n";
+  assert.throws(() => assertNeverLinked("XP Track", md), /autolink host/);
+});
+
+test("private-project link guard allows a bare scheme-less host, which GFM does not link", () => {
+  // The boundary, and the reason it sits exactly here: the same API check
+  // confirms GitHub renders `example.com/xp-track` as plain text, NOT a
+  // link. A rule for bare scheme-less hosts would therefore only manufacture
+  // false positives, so there deliberately isn't one. This test pins the
+  // boundary so a future round cannot widen it on a guess -- the same
+  // standard that keeps the unconfirmed split-reference case unchased.
+  const md = "**XP Track** `[private]` see example.com/xp-track\n";
+  assert.doesNotThrow(() => assertNeverLinked("XP Track", md));
+
+  // ...while the *linked* form of that same host is still rejected, so the
+  // allowance above is about how GFM renders it, not about the host itself.
+  const linked = "**XP Track** `[private]` see [XP Track](example.com/xp-track)\n";
+  assert.throws(() => assertNeverLinked("XP Track", linked), /inline-link marker/);
 });
 
 test("README links the public repos it names", async () => {
