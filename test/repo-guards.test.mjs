@@ -6,21 +6,31 @@ import { execFileSync } from "node:child_process";
 const root = new URL("../", import.meta.url);
 const read = (rel) => readFile(new URL(rel, root), "utf8");
 
-// Enumerate tracked files only (via `git ls-files`), not the filesystem.
-// `.superpowers/sdd/` is a git-ignored working directory that holds briefs
-// and reports which can never be published — scanning it would guard
-// content that isn't part of the repo this README task actually governs.
-// Constraint C4 ("no email/phone anywhere in the repo") is read as "in what
-// is tracked and therefore published", so tracked-only enumeration is the
-// correct check, not an approximation of one.
-function trackedFiles() {
-  return execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
+// Enumerate every file that would be published if committed right now:
+// tracked files (--cached) plus untracked-but-not-ignored files (--others),
+// with .gitignore applied (--exclude-standard). This is deliberately wider
+// than plain `git ls-files`. Plain `--cached` misses a file someone just
+// created and hasn't `git add`ed yet -- exactly the moment a stray address
+// is most likely to exist, since CI's checkout is always fully tracked but
+// a local working tree is not. `--exclude-standard` is what keeps this from
+// reopening the problem that moved us off a filesystem walk in the first
+// place: `.superpowers/sdd/` is git-ignored, so it is still excluded by
+// construction, along with `node_modules/` and everything else .gitignore
+// covers -- proven empirically (see task-9-report.md), not assumed. Do NOT
+// "simplify" this back to plain `git ls-files`; that silently drops the
+// untracked-file coverage this exists for.
+function publishableFiles() {
+  return execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard"],
+    { cwd: root, encoding: "utf8" }
+  )
     .split("\n")
     .filter(Boolean);
 }
 
 function textFiles() {
-  return trackedFiles().filter((f) => /\.(mjs|js|json|md|ya?ml|svg)$/.test(f));
+  return publishableFiles().filter((f) => /\.(mjs|js|json|md|ya?ml|svg)$/.test(f));
 }
 
 test("no email address appears anywhere in the repo", async () => {
