@@ -39,9 +39,16 @@ jobs:
       # from retriggering itself every day. If `main` ever gets branch
       # protection that rejects this workflow's direct push, do NOT "fix"
       # it by adding `with: token: ${{ secrets.SOME_PAT }}` here: pushes
-      # authored by a PAT *do* retrigger `on: push`, and card.svg/heatmap.svg
-      # aren't in this workflow's own push.paths filter, so nothing else
-      # would stop the resulting loop.
+      # authored by a PAT *do* retrigger `on: push`. There IS a second line
+      # of defence -- this job only ever commits card.svg and heatmap.svg,
+      # and neither is listed in the push.paths filter above, so a push of
+      # just those two files matches no path and the trigger would not fire
+      # even under a PAT. Do not lean on it alone: it holds only while the
+      # commit step's file list and that paths list stay disjoint, and one
+      # day's edit to either (adding src/** output, say, or listing the SVGs
+      # as inputs) silently removes it, at which point the loop is a daily
+      # self-retriggering push on an unwatched repo. Two independent reasons
+      # are the point; keep both.
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4

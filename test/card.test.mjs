@@ -42,10 +42,19 @@ test("buildSections reports the contribution total, not follower or repo counts"
   assert.ok(!/repos/.test(github.value));
 });
 
-test("buildSections aligns every value column at 13 characters", () => {
+// Renamed: this asserts a fixed-width label+leader field, which is all the
+// dot padding does. It does not (and never did) test value-column alignment
+// -- layoutRight right-anchors every value against the panel's inner edge
+// with text-anchor="end", so the values line up whatever the dots do. See
+// kv's comment in src/util.mjs.
+test("buildSections gives every row a 13-character label+leader field", () => {
   for (const section of buildSections(5522)) {
     for (const row of section.rows) {
-      assert.equal(row.label.length + row.dots.length, 13, `misaligned: ${row.label}`);
+      assert.equal(
+        row.label.length + row.dots.length,
+        13,
+        `label+leader field is not 13 characters wide: ${row.label}`
+      );
     }
   }
 });

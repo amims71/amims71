@@ -282,19 +282,26 @@ function buildPeakMarkers(weeks, scale, geo) {
     const o = touchOpacity(laneFraction(cx, gridW));
     const x = (GEOM.gridX + peak.weekIndex * step - 1.5).toFixed(1);
     const y = (GEOM.gridY + peak.weekday * step - 1.5).toFixed(1);
-    // Base opacity is o.values[0], not a hardcoded "0". touchOpacity's own
-    // comment documents that a column at either end of the lane can collide
-    // two coincident keyframes at t=0 (or t=1) and deliberately keeps the
-    // brighter one so the pulse still flashes during real SMIL playback --
-    // which means the animation's true first sample is occasionally 1, not
-    // 0 (verified: touchOpacity(0) -> values [1,1,0,0,1,1]). A hardcoded
-    // "0" base would then disagree with that first sample, and an
-    // <img>-embedded SVG (which freezes at the animation's first sample,
-    // not the base) would show a permanently-lit marker at rest whenever
-    // that edge case is hit. Deriving the base straight from the same
-    // array that drives the animation keeps the two in sync by
-    // construction, for every column, without touching touchOpacity's
-    // approved pulse shape at all.
+    // Base opacity is o.values[0], not a hardcoded "0" -- but no longer
+    // because the first sample is ever 1. touchOpacity used to let a column
+    // at either end of the lane collide a pulse sample onto the cycle
+    // anchor and keep the brighter one, so its true first sample could be 1;
+    // that was itself a defect (a marker lit on first paint, which is the
+    // only frame an <img>-embedded SVG ever shows) and it is fixed at the
+    // source: touchOpacity now pins values[0] and values[at] closed
+    // unconditionally, so every column's first sample is 0. Measured today:
+    // touchOpacity(0) -> [0,1,0,0,1,0], touchOpacity(1) -> [0,0,1,1,0,0].
+    // The earlier claim in this comment -- "verified: touchOpacity(0) ->
+    // values [1,1,0,0,1,1]" -- is no longer true of the code and has been
+    // removed rather than left as false evidence for a correct decision.
+    //
+    // Deriving is kept anyway, and the reason is construction rather than
+    // any current edge case: an <img>-embedded SVG freezes at the
+    // animation's first sample and ignores the base, so the two MUST agree,
+    // and reading the base out of the very array that drives the animation
+    // makes them agree by construction -- including if touchOpacity's pulse
+    // shape is ever revised again. A hardcoded "0" would be correct today
+    // and silently wrong the next time that math changes.
     out +=
       `<rect class="peak-marker" x="${x}" y="${y}" width="${GEOM.cell + 3}" height="${GEOM.cell + 3}" rx="3.5" fill="none" stroke="${THEME.amber}" stroke-width="1.4" opacity="${o.values[0]}">` +
       `<animate attributeName="opacity" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${o.keyTimes.join(";")}" values="${o.values.join(";")}"/></rect>`;
