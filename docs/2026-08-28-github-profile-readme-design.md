@@ -341,3 +341,33 @@ Then create the repo, push, and confirm the rendered profile at
 | 6 | Card shows contribution total, not repo/follower counts | 2026-08-28 |
 | 7 | `EXPERIENCE` panel replaces `TECH.STACK` | 2026-08-28 |
 | 8 | Fail loudly on API error; never synthesize data | 2026-08-28 |
+
+## 12. Amendments (as built)
+
+This document was approved on 2026-08-28 and not amended during
+implementation, so several sections below §11 describe decisions the code has
+since replaced. The reasoning behind each replacement lives in the build
+ledger, which is git-ignored and will not survive publication — after release
+this file is the repo's only account of itself, and an unamended design
+document that contradicts its own code argues against the code.
+
+The original sections are deliberately left as written. An amendment log is
+more honest than a silent edit: it shows what was believed at design time,
+what measurement changed it, and in which direction the reasoning moved.
+
+| # | Spec says | Code does | Why |
+|---|---|---|---|
+| 1 | §5.3: each key/value row wipe-reveals via an animated `clipPath`, 0.4s, staggered 0.08s | No reveal animation at all; rows render unconditionally | Chrome, rendering an SVG embedded via `<img>` (exactly how GitHub renders README images), freezes each animated attribute at the animation's **first sample** and ignores the base value. The reveal clip's base width was the fully-revealed width but its first sample was 0, so all fourteen rows rendered invisible on the live profile. Removing the mechanism is the only fix that cannot drift back out of sync. |
+| 2 | §6: cells fade in over 0.35s on a 0.012s per-column stagger | Cells are drawn plainly, no animation | Same first-sample freeze: base opacity 1, first sample 0, so the entire grid rendered invisible. |
+| 3 | §6: cell level is the ratio to the **window maximum** at 0.65 / 0.40 / 0.15 | Ratio to the **90th percentile of active days** (nearest-rank), same cutoffs | Measured against the real calendar, a single 209-contribution day set the ceiling and pushed 61.9% of active days into level 1. The p90 scale spreads the four shades evenly and still saturates genuinely exceptional days to level 4. |
+| 4 | §6.1 describes the glider and probe beam, and nothing else | The glider also carries the target column's **contribution count**, and the busiest day in the window is spotlighted at rest (parked glider, lit outline, count showing) | Requested by the owner after seeing a render. Because an `<img>`-embedded SVG never animates on screen, a count that only appeared mid-sweep would never be seen — so the resting frame, the only frame most visitors get, had to be the informative one. |
+| 5 | §5.2 step 4: density from inverted luminance, `d = 1 - L` | `d = (1 - L) ** 1.8` | A studio portrait against a near-white background gets stretched by `normalize()` until the whole subject sits in the dark end of the ramp and features mush together. The gamma thins mid-tones back out. Four gamma variants were compared before settling on 1.8. |
+| 6 | §5.2.2 gives a validated reference character grid for the avatar, as the acceptance check for the ASCII pipeline | That grid is from the V4 run against the **previous** avatar photo (replaced 2026-08-31); it is not the current output and is not asserted anywhere | The owner supplied a new profile photo late in the build. The source is still 460×460, so §5.2's crop constants still apply, but the reference grid no longer matches. The pipeline is pinned by unit tests plus a browser render instead of by a stored grid, which is what a replaceable input demands. |
+| 7 | §9: steps are checkout, **setup-node 20**, `npm ci`, `npm run generate`, then commit; `push.paths` covers `generate.mjs`, `avatar.png`, `package.json` and the workflow | setup-node **22**; an `npm test` step runs between generate and commit; a `concurrency: cards-refresh` group with `cancel-in-progress: false`; `push.paths` also covers `src/**` and `package-lock.json` | Node 20 leaves LTS maintenance during this project's life. Generate-before-test means CI validates the artifacts it is about to commit, not yesterday's. Without a concurrency group, two overlapping runs race to `git push` and the loser fails non-fast-forward with no retry, silently dropping a day's refresh. The generator's logic moved into `src/**`, so a change there must trigger a refresh. |
+| 8 | §10 step 3: verify by rendering both SVGs with `rsvg-convert` and inspecting the PNGs | Verification is a real browser render of the SVG **embedded via `<img>`**, plus structural and animation guards run over the committed files in CI | `rsvg-convert` does not execute SMIL, so it structurally could not see this project's most consequential defect — both artifacts shipped with their content invisible on GitHub while every rsvg render looked correct. It also ignores CSS `white-space: pre`, which distorted every ASCII-portrait assessment made through it until `xml:space="preserve"` was added. rsvg remains useful only as a cheap "is this parseable" gate. |
+| 9 | §7 requires failing loudly on an API **error**, and records as an open risk that the Actions `GITHUB_TOKEN` may not resolve the private-inclusive calendar | The generator also refuses to write if the fetched total has dropped **more than 50%** below the total in the committed `card.svg` (`src/integrity.mjs`) | The open risk is not an error path: a token that cannot see private contributions returns a smaller number that is entirely real. Measured 2026-08-31, `restrictedContributionsCount` is 5,130 of 5,477, so that failure would republish about a sixteenth of the truth under a `LIVE` badge with a fresh timestamp, and pass every other guard. C3 forbids fabricated data; this closes the adjacent case of real data that misleads. |
+| 10 | §5.3's sample panel shows `5,522 contributions`; §7 records 5,522 total / 5,175 restricted | Live on 2026-08-31: 5,477 total / 5,130 restricted; the committed card carries 5,476 | Both figures are a rolling 12-month window and change daily. The spec's numbers are a 2026-08-28 snapshot, not a target. |
+
+Unchanged and still binding as written: every constraint in §2, the palette in
+§4, the dark-only decision, the panel content in §5.3, the C5 treatment of
+private projects in §8, and the fail-loudly-never-synthesize rule in §7.
