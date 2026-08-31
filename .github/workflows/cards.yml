@@ -14,12 +14,34 @@ on:
       - package-lock.json
       - .github/workflows/cards.yml
 
+# Three trigger sources above (schedule, workflow_dispatch, push) can all
+# reach the commit/push step below. Without a shared group, two overlapping
+# runs would both check out the same base and race to `git push`, and the
+# loser fails non-fast-forward with no retry -- silently dropping that
+# day's refresh on a repo nobody is watching. cancel-in-progress is false
+# on purpose: cancelling a run mid-generate would abandon a refresh
+# part-way through, whereas queuing lets the second run check out fresh
+# after the first has already pushed, so it naturally picks up the latest
+# base instead of racing against it.
+concurrency:
+  group: cards-refresh
+  cancel-in-progress: false
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # Deliberately no `with: token:`. The bare default uses the ephemeral
+      # github.token (GITHUB_TOKEN), and pushes authored by GITHUB_TOKEN do
+      # not re-trigger `on: push` workflows -- that's what keeps this job
+      # from retriggering itself every day. If `main` ever gets branch
+      # protection that rejects this workflow's direct push, do NOT "fix"
+      # it by adding `with: token: ${{ secrets.SOME_PAT }}` here: pushes
+      # authored by a PAT *do* retrigger `on: push`, and card.svg/heatmap.svg
+      # aren't in this workflow's own push.paths filter, so nothing else
+      # would stop the resulting loop.
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
