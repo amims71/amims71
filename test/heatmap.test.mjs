@@ -511,13 +511,45 @@ test("buildHeatmapSvg's glider body is wide enough to fit a 3-digit contribution
   const bodyRe = new RegExp(`<path d="([^"]+)" fill="${THEME.cyan}" stroke="${THEME.green}" stroke-width="1"/>`);
   const bodyMatch = out.match(bodyRe);
   assert.ok(bodyMatch, "glider body path not found");
-  const xs = [...bodyMatch[1].matchAll(/(-?\d+(?:\.\d+)?),-?\d+(?:\.\d+)?/g)].map(([, x]) => Number(x));
-  assert.ok(xs.length > 0, "no coordinates parsed out of the glider body path");
-  const bodyWidth = Math.max(...xs) - Math.min(...xs);
+  const points = [...bodyMatch[1].matchAll(/(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g)].map(([, x, y]) => [
+    Number(x),
+    Number(y),
+  ]);
+  assert.ok(points.length >= 3, "fewer than 3 coordinates parsed out of the glider body path");
 
   const fontSizeMatch = out.match(/class="glider-count" x="0" y="0"[^>]*font-size="(\d+(?:\.\d+)?)"/);
   assert.ok(fontSizeMatch, "glider-count font-size not found");
   const fontSize = Number(fontSizeMatch[1]);
+
+  // The digits sit inside the same local coordinate space as the path
+  // (both live in the same `<g transform="scale(1.4)">`), vertically
+  // centred on (0,0) via text y="0" dominant-baseline="central" -- so they
+  // occupy roughly y in [-fontSize/2, +fontSize/2], NOT y=0. The hexagon's
+  // widest point is exactly at y=0 (its tip-to-tip x-extent); its slanted
+  // edges taper the available width well before that knife-edge, so the
+  // real limit on label width is the polygon's width where the text
+  // actually sits, not its tip-to-tip extent. Compute that by intersecting
+  // the path's own edges with the horizontal line at that y, rather than
+  // hardcoding the hexagon's vertex coordinates.
+  function widthAtY(y) {
+    const xs = [];
+    for (let i = 0; i < points.length; i++) {
+      const [x1, y1] = points[i];
+      const [x2, y2] = points[(i + 1) % points.length];
+      if (y1 === y2) continue; // horizontal edge can't bound a single-y crossing
+      const lo = Math.min(y1, y2);
+      const hi = Math.max(y1, y2);
+      if (y < lo || y > hi) continue;
+      const t = (y - y1) / (y2 - y1);
+      xs.push(x1 + t * (x2 - x1));
+    }
+    assert.ok(xs.length >= 2, `expected at least two glider-body edge crossings at y=${y}, got ${xs.length}`);
+    return Math.max(...xs) - Math.min(...xs);
+  }
+
+  // Take the narrower of the two vertical extents the text spans, in case
+  // the body is ever asymmetric top-to-bottom.
+  const bodyWidth = Math.min(widthAtY(fontSize / 2), widthAtY(-fontSize / 2));
 
   // The widest label in real data is 3 digits (e.g. "209" -- see
   // task-12-brief.md). Estimate its rendered width the same way the brief
@@ -526,7 +558,9 @@ test("buildHeatmapSvg's glider body is wide enough to fit a 3-digit contribution
   const estimatedWidth = digits * fontSize * 0.6;
   assert.ok(
     estimatedWidth < bodyWidth,
-    `estimated ${digits}-digit label width ${estimatedWidth} does not comfortably fit inside the glider body's width ${bodyWidth}`
+    `estimated ${digits}-digit label width ${estimatedWidth} does not comfortably fit inside the glider body's ` +
+      `width ${bodyWidth} at the text's actual vertical extent (y=+-${fontSize / 2}), not the body's tip-to-tip ` +
+      `x-extent at y=0`
   );
 });
 

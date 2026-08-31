@@ -72,8 +72,27 @@ function parseAttrs(attrText) {
 // y2/cy/r are added to the same scalar-attribute set opacity/width already
 // use. `transform` is handled separately below because animateTransform's
 // values are "x,y" pairs, not bare scalars.
-const SCALAR_ATTRS = new Set(["opacity", "width", "y2", "cy", "r"]);
+//
+// A second task-12 fix-review round found the guard *still* incomplete
+// after the above, and proved it: fed a fragment with a deliberately
+// mismatched stroke and stroke-width, the guard returned `checked = 2` with
+// no failure -- both attribute names were simply absent from the set, so
+// they were silently skipped rather than checked and passed. stroke-width
+// is a genuine number, so it joins NUMERIC_ATTRS and is compared
+// numerically like the others (so "2.60" vs "2.6" doesn't false-positive
+// under a naive string compare). stroke/fill/stop-color are colour strings
+// like "#00ff66", not numbers -- Number("#00ff66") is NaN, so a numeric
+// compare would either throw or (worse) silently pass via NaN-equals-NaN.
+// They get their own COLOR_ATTRS set and a normalised (trimmed,
+// lowercased) string compare instead.
+const NUMERIC_ATTRS = new Set(["opacity", "width", "y2", "cy", "r", "stroke-width"]);
+const COLOR_ATTRS = new Set(["stroke", "fill", "stop-color"]);
+const SCALAR_ATTRS = new Set([...NUMERIC_ATTRS, ...COLOR_ATTRS]);
 const DEFAULT_BASE_VALUE = { opacity: "1" };
+
+function normalizeColor(v) {
+  return (v || "").trim().toLowerCase();
+}
 
 // Parses a simple `translate(x,y)` string into ["x","y"], or null if it
 // isn't one. Deliberately narrow -- per task-12 fix-review, "do not try to
@@ -108,13 +127,26 @@ export function assertAnimationsMatchBaseValues(svg) {
         `<${parent.name}> animates ${attrName} but has no base ${attrName} attribute and no default is defined`
       );
       const firstSample = (attrs.values || "").split(";")[0]?.trim();
-      assert.equal(
-        firstSample,
-        baseValue,
+      const mismatchMsg =
         `<${parent.name}> animates ${attrName} starting at "${firstSample}" but its base ${attrName} is ` +
-          `"${baseValue}" -- an <img>-embedded SVG freezes at the animation's first sample, ignoring the base ` +
-          `value, so the two must agree or the element renders wrong (or invisible) in every README`
-      );
+        `"${baseValue}" -- an <img>-embedded SVG freezes at the animation's first sample, ignoring the base ` +
+        `value, so the two must agree or the element renders wrong (or invisible) in every README`;
+      if (COLOR_ATTRS.has(attrName)) {
+        // Colour values (e.g. "#00ff66") aren't numbers -- compare
+        // normalised strings instead of parsing them numerically.
+        assert.equal(normalizeColor(firstSample), normalizeColor(baseValue), mismatchMsg);
+      } else {
+        // Numeric compare, not exact-string, so equivalent representations
+        // like "2.60" and "2.6" agree instead of false-positiving. Guard
+        // against non-numeric garbage on either side first -- Node's
+        // assert.equal uses Object.is, under which NaN === NaN is true, so
+        // a bad parse on both sides would otherwise silently "match".
+        const firstNum = Number(firstSample);
+        const baseNum = Number(baseValue);
+        assert.ok(!Number.isNaN(firstNum), `<${parent.name}> animates ${attrName} with a non-numeric first sample "${firstSample}"`);
+        assert.ok(!Number.isNaN(baseNum), `<${parent.name}> has a non-numeric base ${attrName} "${baseValue}"`);
+        assert.equal(firstNum, baseNum, mismatchMsg);
+      }
       checked += 1;
     }
     // Not every animateTransform-driven element declares a base `transform`
@@ -123,7 +155,21 @@ export function assertAnimationsMatchBaseValues(svg) {
     // codebase (card.mjs's scan-beam sweep) intentionally has none. Where a
     // base transform IS declared, though, it is held to the exact same
     // rule as every other attribute above.
-    if (name === "animateTransform" && attrs.attributeName === "transform" && attrs.type === "translate") {
+    //
+    // This branch used to silently skip any animateTransform whose type
+    // wasn't "translate" -- not counted, no failure -- the same silent-skip
+    // pattern task-12 review flagged for stroke/fill above. Every
+    // animateTransform in this codebase today is a translate, but a future
+    // scale/rotate/matrix animation must fail loudly here instead of
+    // slipping through unpoliced.
+    if (name === "animateTransform" && attrs.attributeName === "transform") {
+      assert.equal(
+        attrs.type,
+        "translate",
+        `<animateTransform> uses unsupported animateTransform type "${attrs.type}" -- this guard only ` +
+          `understands "translate"; add support for it here before using another type, or its ` +
+          `first-sample-vs-base-value agreement goes completely unchecked`
+      );
       const parent = stack[stack.length - 1];
       assert.ok(parent, `<animateTransform attributeName="transform"> has no enclosing element`);
       const baseTransform = parent.attrs.transform;
