@@ -206,27 +206,31 @@ test("touchOpacity opens and closes at zero and peaks twice", () => {
   for (let i = 1; i < nums.length; i++) assert.ok(nums[i] > nums[i - 1]);
 });
 
-test("touchOpacity stays monotonic at the extremes of the lane", () => {
+// Extended during a second fix-review round. touchOpacity's own comment
+// documents that a column at either end of the lane collides two
+// coincident keyframes at the boundary and deliberately keeps the
+// brighter sample so the pulse still flashes rather than emitting a
+// duplicate keyTime (which would kill the whole animation). At exactly
+// f=0 (and, in principle, f=1) that collision used to land ON the fixed
+// opening/closing anchor points themselves, so the animation's true first
+// (and last) sample became 1, not 0 -- lit instead of hidden. For a
+// *playing* animation that's physically correct (the glider genuinely is
+// at the lane's edge at t=0), but an <img>-embedded SVG's first paint --
+// what almost every viewer actually sees on page load -- lands at (or
+// extremely close to) that same first sample (see task-8-report.md), so
+// the correct-during-playback instant becomes a mis-lit marker on first
+// sight instead. touchOpacity now pins both cycle endpoints closed
+// regardless of any coincident pulse, so this test also covers what used
+// to be a separate, now-corrected test ("touchOpacity at the very edge of
+// the lane opens and closes lit, not hidden") asserting the opposite.
+test("touchOpacity stays monotonic at the extremes of the lane, closed at both ends", () => {
   for (const f of [0, 1]) {
-    const nums = touchOpacity(f).keyTimes.map(Number);
+    const o = touchOpacity(f);
+    const nums = o.keyTimes.map(Number);
     for (let i = 1; i < nums.length; i++) assert.ok(nums[i] > nums[i - 1], `f=${f} not ascending at ${i}`);
+    assert.equal(o.values[0], 0, `f=${f} should open hidden, not lit`);
+    assert.equal(o.values[o.values.length - 1], 0, `f=${f} should close hidden, not lit`);
   }
-});
-
-// Found while verifying the task-8 fix-review's shared base/first-sample
-// guard: touchOpacity's own comment documents that a column at either end
-// of the lane collides two coincident keyframes at the boundary and
-// deliberately keeps the brighter sample so the pulse still flashes rather
-// than emitting a duplicate keyTime (which would kill the whole animation).
-// At exactly f=0 that collision lands ON the fixed opening/closing anchor
-// points themselves, so the animation's true first (and last) sample is 1,
-// not 0 -- the opposite of every interior column. This is pinned down here
-// because buildPeakMarkers' base opacity is derived from this exact value
-// (see its comment), not hardcoded, precisely so the two stay in sync.
-test("touchOpacity at the very edge of the lane opens and closes lit, not hidden", () => {
-  const o = touchOpacity(0);
-  assert.equal(o.values[0], 1);
-  assert.equal(o.values[o.values.length - 1], 1);
 });
 
 test("buildHeatmapSvg includes the glider and its dashed lane", () => {
@@ -271,16 +275,17 @@ test("buildHeatmapSvg flashes amber markers only on bright peak days", () => {
 // fix used for heat-cells here, or every marker would be permanently lit at
 // rest.
 //
-// Updated during the task-8 fix-review: this used to assert every marker's
-// base was the literal "0". That was true for every column except one --
-// see "touchOpacity at the very edge of the lane opens and closes lit, not
-// hidden" above -- so buildPeakMarkers now derives each marker's base
-// straight from its own animation's first sample instead of hardcoding "0".
-// The real invariant is "hidden at rest, except where the animation's own
-// first sample says otherwise", which is exactly "base equals first
-// sample" -- so this also doubles as a per-marker instance of the shared
-// guard, plus a sanity check that most markers are, in fact, still hidden.
-test("buildHeatmapSvg keeps peak-marker base opacity in sync with its own animation's first sample", () => {
+// This went through two rounds during fix-review. Round 1: buildPeakMarkers
+// derived each marker's base straight from its own animation's first
+// sample instead of hardcoding "0", because one column (the very edge of
+// the lane) genuinely had a first sample of 1 at the time. Round 2: that
+// edge case was itself a bug in touchOpacity (see its test above), now
+// fixed at the source, so every column's first sample -- and therefore
+// every marker's base -- is 0 again. buildPeakMarkers' derive-don't-
+// hardcode approach was kept regardless: it is still correct, and it means
+// this invariant holds by construction rather than needing a human to
+// re-verify it by hand if touchOpacity's math ever changes again.
+test("buildHeatmapSvg keeps every peak marker hidden at rest, base opacity in sync with its own animation's first sample", () => {
   const out = svg();
   const markers = [
     ...out.matchAll(/<rect class="peak-marker"[^>]*opacity="([^"]+)">\s*<animate attributeName="opacity"[^>]*values="([^"]+)"/g),
@@ -288,8 +293,8 @@ test("buildHeatmapSvg keeps peak-marker base opacity in sync with its own animat
   assert.ok(markers.length > 0, "no peak markers emitted");
   for (const [, base, values] of markers) {
     assert.equal(base, values.split(";")[0], "peak-marker base opacity must match its own animation's first sample");
+    assert.equal(base, "0", "every peak marker should be hidden at rest, including at the extremes of the lane");
   }
-  assert.ok(markers.some(([, base]) => base === "0"), "expected at least one peak marker hidden at rest");
 });
 
 // Review finding 1: buildGlider's cockpit dot used a raw `fill="#ffffff"`

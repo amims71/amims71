@@ -117,6 +117,25 @@ export function touchOpacity(xFraction) {
     keyTimes.push(t.toFixed(4));
     values.push(v);
   }
+
+  // The two fixed cycle endpoints (t=0 and t=1) must always be closed, even
+  // when a column at the very edge of the lane collides its own pulse
+  // samples with them. For a *playing* animation, a lit instant at t=0 is
+  // physically correct -- the glider genuinely is at the lane's edge then
+  // -- but an <img>-embedded SVG's first paint lands at (or extremely close
+  // to) the animation's first sample (see task-8-report.md), so that
+  // correct instant is exactly what a typical page load shows, turning it
+  // into a mis-lit marker on first sight. (Verified directly: a same-origin
+  // canvas readback of the <img> does drift over real elapsed time on
+  // later repaints -- it is not eternally frozen -- but the first paint is
+  // what almost every viewer actually sees, so it must be correct too.)
+  // The interior merge-keeps-the-brighter-sample behaviour above is
+  // unchanged and still deliberate; only the two anchor instants are
+  // pinned shut, so the seeded [0, 0] and [1, 0] points always win there
+  // regardless of what collided with them.
+  values[0] = 0;
+  values[values.length - 1] = 0;
+
   return { keyTimes, values };
 }
 
