@@ -33,16 +33,96 @@ function textFiles() {
   return publishableFiles().filter((f) => /\.(mjs|js|json|md|ya?ml|svg)$/.test(f));
 }
 
+const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.]{2,}/;
+
+// The literal shell-prompt text in both SVGs is `amims71@github ~ % ...`,
+// always followed by whitespace, never a dot. The lookahead pins the
+// whitelist to that exact shape. An earlier, unanchored version stripped
+// this prefix wherever it appeared, so it would also eat the domain
+// suffix off a real address that happens to start with the same prefix,
+// hiding it from the scan below behind what looked like a narrow, safe
+// whitelist. Do not remove the `(?=\s|$)` lookahead -- see the anchoring
+// test below, which exists so that regression fails loudly, not silently.
+// (That test builds its fixture addresses from parts, on purpose: writing
+// the domain suffix directly here would itself trip the guard below.)
+function stripWhitelistedEmails(text) {
+  return text
+    .replace(/amims71@github(?=\s|$)/g, "")
+    .replace(/github-actions\[bot\]@users\.noreply\.github\.com/g, "");
+}
+
+function containsEmail(text) {
+  return EMAIL_PATTERN.test(stripWhitelistedEmails(text));
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Asserts that `name` is never linked in `md`, by any of the three ways
+// Markdown can express a link: an inline link on the same line, an HTML
+// anchor wrapping the name, or a reference-style link (either the explicit
+// `[name][label]`/`[name][]` form, or the shortcut `[name]` form backed by
+// a `[name]: url` definition that can live anywhere else in the document).
+// Constraint C5 is "never linked" full stop, so this is the one place that
+// claim is proven -- keep every new link mechanism landing here instead of
+// as a one-off regex next to a single call site.
+function assertNeverLinked(name, md) {
+  const esc = escapeRegex(name);
+  const lines = md.split("\n").filter((l) => l.includes(name));
+  assert.ok(lines.length > 0, `missing project ${name}`);
+  assert.ok(lines.some((l) => /\[private\]/.test(l)), `${name} not marked [private]`);
+  for (const line of lines) {
+    assert.ok(!/\]\(http/.test(line), `${name} must not be inline-linked`);
+    assert.ok(!/<a\s[^>]*href/i.test(line), `${name} must not be wrapped in an HTML anchor`);
+  }
+
+  const explicitRef = new RegExp(`\\[${esc}\\]\\[[^\\]]*\\]`);
+  assert.ok(
+    !explicitRef.test(md),
+    `${name} must not be linked via a reference-style [text][label]`
+  );
+
+  const hasDefinition = new RegExp(`^[ \\t]*\\[${esc}\\]:\\s*\\S+`, "m").test(md);
+  if (hasDefinition) {
+    const usedAsShortcut = new RegExp(`\\[${esc}\\](?!\\(|\\[|:)`);
+    assert.ok(
+      !usedAsShortcut.test(md),
+      `${name} must not be linked via a shortcut reference definition`
+    );
+  }
+}
+
 test("no email address appears anywhere in the repo", async () => {
   const files = textFiles();
   assert.ok(files.length > 0, "expected to scan at least one tracked text file");
   for (const f of files) {
-    const body = (await read(f))
-      .replace(/amims71@github/g, "")                      // the shell prompt, not an address
-      .replace(/github-actions\[bot\]@users\.noreply\.github\.com/g, ""); // the CI committer
-    const hit = body.match(/[\w.+-]+@[\w-]+\.[\w.]{2,}/);
+    const body = stripWhitelistedEmails(await read(f));
+    const hit = body.match(EMAIL_PATTERN);
     assert.equal(hit, null, `${f} contains an email-like string: ${hit && hit[0]}`);
   }
+});
+
+test("the shell-prompt email whitelist is anchored, not a blanket exemption", () => {
+  // Built from parts rather than written as a literal contiguous string:
+  // this file is itself scanned by "no email address appears anywhere in
+  // the repo" below, and writing a real-looking address directly in the
+  // source here would trip that guard on its own fixture.
+  const realPrompt = ["amims71", "github"].join("@") + " ~ % ./profile.sh";
+  const genuineDotCom = ["amims71", "github.com"].join("@");
+  const genuineDotIo = "contact " + ["amims71", "github.io"].join("@") + " please";
+
+  assert.equal(containsEmail(realPrompt), false, "the real prompt text must still read as non-email");
+  assert.equal(
+    containsEmail(genuineDotCom),
+    true,
+    "a genuine address sharing the prompt's prefix must not be whitelisted away"
+  );
+  assert.equal(
+    containsEmail(genuineDotIo),
+    true,
+    "a genuine address sharing the prompt's prefix must not be whitelisted away"
+  );
 });
 
 test("no phone number appears anywhere in the repo", async () => {
@@ -74,11 +154,37 @@ test("README links out to the Pages site", async () => {
 test("README marks every private project and links none of them", async () => {
   const md = await read("README.md");
   for (const name of ["XP Track", "Multi-Tenant E-commerce System", "CRM"]) {
-    assert.ok(md.includes(name), `missing project ${name}`);
-    const line = md.split("\n").find((l) => l.includes(name));
-    assert.match(line, /\[private\]/, `${name} not marked [private]`);
-    assert.ok(!/\]\(http/.test(line), `${name} must not be linked`);
+    assertNeverLinked(name, md);
   }
+});
+
+test("private-project link guard rejects an HTML-anchor link", () => {
+  const md = '**XP Track** `[private]` <a href="https://example.com">wrapped</a>\n';
+  assert.throws(() => assertNeverLinked("XP Track", md), /HTML anchor/);
+});
+
+test("private-project link guard rejects an explicit reference-style link", () => {
+  const md = [
+    "**XP Track** `[private]`",
+    "",
+    "See also [XP Track][1] for details.",
+    "",
+    "[1]: https://example.com/xp-track",
+    "",
+  ].join("\n");
+  assert.throws(() => assertNeverLinked("XP Track", md), /reference-style/);
+});
+
+test("private-project link guard rejects a shortcut reference-style link", () => {
+  const md = [
+    "**XP Track** `[private]`",
+    "",
+    "See also [XP Track] for details.",
+    "",
+    "[XP Track]: https://example.com/xp-track",
+    "",
+  ].join("\n");
+  assert.throws(() => assertNeverLinked("XP Track", md), /shortcut reference/);
 });
 
 test("README links the public repos it names", async () => {
