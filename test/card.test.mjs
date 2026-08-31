@@ -110,7 +110,15 @@ test("buildCardSvg stamps the sync time", () => {
 
 test("buildCardSvg publishes no email address or phone number", () => {
   const out = svg();
-  assert.ok(!/[\w.]+@[\w.]+\.\w+/.test(out.replace(/amims71@github/g, "")), "email-like string present");
+  // Anchored to `(?=\s|$)`: the shell-prompt text is always followed by
+  // whitespace, so the legitimate case still strips, but an unanchored
+  // version would also eat the domain off a real `amims71@github.*`
+  // address before the email check ever ran — the same bug fixed in
+  // test/repo-guards.test.mjs, kept in sync here on purpose.
+  assert.ok(
+    !/[\w.]+@[\w.]+\.\w+/.test(out.replace(/amims71@github(?=\s|$)/g, "")),
+    "email-like string present"
+  );
   // Anchored on the leading "+" of international format. An unanchored digit
   // run matches SVG coordinate soup — viewBox="0 0 1180 662" is not a phone
   // number.

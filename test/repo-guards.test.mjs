@@ -59,36 +59,41 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Asserts that `name` is never linked in `md`, by any of the three ways
-// Markdown can express a link: an inline link on the same line, an HTML
-// anchor wrapping the name, or a reference-style link (either the explicit
-// `[name][label]`/`[name][]` form, or the shortcut `[name]` form backed by
-// a `[name]: url` definition that can live anywhere else in the document).
-// Constraint C5 is "never linked" full stop, so this is the one place that
-// claim is proven -- keep every new link mechanism landing here instead of
-// as a one-off regex next to a single call site.
+// Asserts that `name` is never linked, as a closed-form property instead
+// of an enumeration of link syntaxes. Every prior round of this guard
+// added one more special case (inline link, HTML anchor, explicit
+// reference, shortcut reference) after finding the previous enumeration
+// missed a syntax -- that pattern is itself the evidence that enumerating
+// syntaxes is the wrong shape. The property that actually matters for C5:
+// no line mentioning the name may carry a URL, an HTML anchor tag, or a
+// reference-link marker; the name may not fall inside an HTML anchor span
+// even when that span crosses a line break; and no reference-style
+// definition may resolve the name to a URL, matched case-insensitively
+// per Markdown's own label semantics. This can over-reject (an unrelated
+// URL merely sharing a line with the name) -- that is the safe direction
+// for a guard whose failure mode is silently publishing a link to private
+// work.
 function assertNeverLinked(name, md) {
   const esc = escapeRegex(name);
   const lines = md.split("\n").filter((l) => l.includes(name));
   assert.ok(lines.length > 0, `missing project ${name}`);
   assert.ok(lines.some((l) => /\[private\]/.test(l)), `${name} not marked [private]`);
   for (const line of lines) {
-    assert.ok(!/\]\(http/.test(line), `${name} must not be inline-linked`);
-    assert.ok(!/<a\s[^>]*href/i.test(line), `${name} must not be wrapped in an HTML anchor`);
+    assert.ok(!/https?:\/\//.test(line), `${name}'s line must carry no URL: ${line}`);
+    assert.ok(!/<a\b/i.test(line), `${name}'s line must carry no HTML anchor tag: ${line}`);
+    assert.ok(!/\]\[/.test(line), `${name}'s line must carry no reference-link marker: ${line}`);
   }
 
-  const explicitRef = new RegExp(`\\[${esc}\\]\\[[^\\]]*\\]`);
-  assert.ok(
-    !explicitRef.test(md),
-    `${name} must not be linked via a reference-style [text][label]`
-  );
+  const flattened = md.replace(/\n/g, " ");
+  for (const span of flattened.match(/<a\b[^>]*>.*?<\/a>/gi) ?? []) {
+    assert.ok(!span.includes(name), `${name} falls inside an HTML anchor span (possibly multi-line)`);
+  }
 
-  const hasDefinition = new RegExp(`^[ \\t]*\\[${esc}\\]:\\s*\\S+`, "m").test(md);
-  if (hasDefinition) {
-    const usedAsShortcut = new RegExp(`\\[${esc}\\](?!\\(|\\[|:)`);
+  const definesName = new RegExp(`^[ \\t]*\\[${esc}\\]:\\s*\\S+`, "im").test(md);
+  if (definesName) {
     assert.ok(
-      !usedAsShortcut.test(md),
-      `${name} must not be linked via a shortcut reference definition`
+      !new RegExp(`\\[${esc}\\](?!\\(|\\[|:)`, "i").test(md),
+      `${name} must not resolve via a case-insensitive reference definition`
     );
   }
 }
@@ -159,8 +164,10 @@ test("README marks every private project and links none of them", async () => {
 });
 
 test("private-project link guard rejects an HTML-anchor link", () => {
-  const md = '**XP Track** `[private]` <a href="https://example.com">wrapped</a>\n';
-  assert.throws(() => assertNeverLinked("XP Track", md), /HTML anchor/);
+  // href deliberately has no "https://" so this exercises the <a>-tag
+  // check in isolation, not the URL check.
+  const md = '**XP Track** `[private]` <a href="/local-page">wrapped</a>\n';
+  assert.throws(() => assertNeverLinked("XP Track", md), /HTML anchor tag/);
 });
 
 test("private-project link guard rejects an explicit reference-style link", () => {
@@ -172,10 +179,16 @@ test("private-project link guard rejects an explicit reference-style link", () =
     "[1]: https://example.com/xp-track",
     "",
   ].join("\n");
-  assert.throws(() => assertNeverLinked("XP Track", md), /reference-style/);
+  assert.throws(() => assertNeverLinked("XP Track", md), /reference-link marker/);
 });
 
 test("private-project link guard rejects a shortcut reference-style link", () => {
+  // The definition line `[XP Track]: https://...` matches the name at the
+  // exact same case as the label, so it lands in `lines` (it contains
+  // "XP Track") and the generic per-line URL check rejects it directly --
+  // it never needs to reach the dedicated definition-matching branch below.
+  // That branch exists for the case-*differing* form only, exercised by
+  // the "case-differing reference label" test.
   const md = [
     "**XP Track** `[private]`",
     "",
@@ -184,7 +197,58 @@ test("private-project link guard rejects a shortcut reference-style link", () =>
     "[XP Track]: https://example.com/xp-track",
     "",
   ].join("\n");
-  assert.throws(() => assertNeverLinked("XP Track", md), /shortcut reference/);
+  assert.throws(() => assertNeverLinked("XP Track", md), /carry no URL/);
+});
+
+// The next four each demonstrate one of the four gaps a later review round
+// found in the previous (enumerated) version of this guard. Each fixture is
+// the minimal document that would have sailed through the old per-line
+// `]\(http` / `<a\s[^>]*href` checks and the case-sensitive definition
+// match, and now doesn't.
+
+test("private-project link guard rejects a same-line autolink", () => {
+  // GFM autolink: <https://...>. Contains no "](" and no "<a", so the old
+  // enumeration missed it outright; the closed-form URL check catches it
+  // because the substring "https://" is present on the name's own line.
+  const md = "**XP Track** `[private]` see <https://example.com> for details\n";
+  assert.throws(() => assertNeverLinked("XP Track", md), /carry no URL/);
+});
+
+test("private-project link guard rejects a bare same-line URL", () => {
+  // GFM auto-links a bare URL with no bracket syntax at all.
+  const md = "**XP Track** `[private]` https://example.com\n";
+  assert.throws(() => assertNeverLinked("XP Track", md), /carry no URL/);
+});
+
+test("private-project link guard rejects a multi-line HTML anchor", () => {
+  // The name sits on its own line, inside an anchor whose opening and
+  // closing tags are on different lines -- a per-line filter never puts
+  // the <a> tag and the name in the same string, which is exactly why
+  // this needs a whole-document, newline-flattened scan.
+  const md = [
+    "**XP Track** `[private]`",
+    "",
+    '<a href="https://example.com">',
+    "XP Track",
+    "</a>",
+    "",
+  ].join("\n");
+  assert.throws(() => assertNeverLinked("XP Track", md), /HTML anchor span/);
+});
+
+test("private-project link guard rejects a case-differing reference label", () => {
+  // Markdown resolves reference labels case-insensitively, so `[XP Track]`
+  // is linked by a `[xp track]: url` definition even though the literal
+  // casing differs. A case-sensitive definition match misses this.
+  const md = [
+    "**XP Track** `[private]`",
+    "",
+    "See also [XP Track] for details.",
+    "",
+    "[xp track]: https://example.com/xp-track",
+    "",
+  ].join("\n");
+  assert.throws(() => assertNeverLinked("XP Track", md), /case-insensitive reference/);
 });
 
 test("README links the public repos it names", async () => {
