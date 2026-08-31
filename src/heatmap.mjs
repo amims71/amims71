@@ -125,10 +125,11 @@ export function touchOpacity(xFraction) {
   // -- but an <img>-embedded SVG's first paint lands at (or extremely close
   // to) the animation's first sample (see task-8-report.md), so that
   // correct instant is exactly what a typical page load shows, turning it
-  // into a mis-lit marker on first sight. (Verified directly: a same-origin
-  // canvas readback of the <img> does drift over real elapsed time on
-  // later repaints -- it is not eternally frozen -- but the first paint is
-  // what almost every viewer actually sees, so it must be correct too.)
+  // into a mis-lit marker on first sight. (Verified on-screen: an <img>-
+  // embedded SVG shows a cached first-paint rasterisation on screen that
+  // does not visibly advance. Glider lane captured six seconds apart showed
+  // no movement. Canvas readback may force re-rasterisation, so it is not a
+  // reliable probe for what viewers actually see.)
   // The interior merge-keeps-the-brighter-sample behaviour above is
   // unchanged and still deliberate; only the two anchor instants are
   // pinned shut, so the seeded [0, 0] and [1, 0] points always win there
