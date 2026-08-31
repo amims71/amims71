@@ -51,15 +51,39 @@ function parseAttrs(attrText) {
 // the two must always agree, so it no longer matters which one a given
 // renderer consults. This walks the tag stream (same tokenizer as
 // assertBalancedXml) and, for every <animate> whose attributeName is a
-// visibility-affecting attribute (opacity or width), asserts that its
-// values list starts with exactly its enclosing element's base value for
-// that attribute. A missing base `opacity` is treated as the SVG default of
-// 1; peak-marker-style animations (base 0, first sample 0 -- meant to stay
+// visibility- or position-affecting attribute (opacity, width, or one of
+// the beam's geometry attributes y2/cy/r), asserts that its values list
+// starts with exactly its enclosing element's base value for that
+// attribute. A missing base `opacity` is treated as the SVG default of 1;
+// peak-marker-style animations (base 0, first sample 0 -- meant to stay
 // hidden at rest) pass this naturally, with no special-casing by name.
-// Returns the number of <animate> elements it checked, so callers can
-// assert the guard actually inspected something and isn't passing vacuously.
-const VISIBILITY_ATTRS = new Set(["opacity", "width"]);
+// Returns the number of <animate>/<animateTransform> elements it checked,
+// so callers can assert the guard actually inspected something and isn't
+// passing vacuously.
+//
+// task-12 fix-review found this same trap "one level deeper" than opacity:
+// the glider's base `transform` was set to point at the spotlight column,
+// but its <animateTransform> still started at the lane's left end, and the
+// beam's base y2/cy/r were set to the spotlight target while their
+// <animate>s still started at week 0's target. An <img>-embedded SVG
+// freezes at the animation's first SAMPLE regardless of the base value (see
+// above), so the base value alone was cosmetic -- the on-screen glider,
+// beam, outline and count disagreed about which column they pointed at.
+// y2/cy/r are added to the same scalar-attribute set opacity/width already
+// use. `transform` is handled separately below because animateTransform's
+// values are "x,y" pairs, not bare scalars.
+const SCALAR_ATTRS = new Set(["opacity", "width", "y2", "cy", "r"]);
 const DEFAULT_BASE_VALUE = { opacity: "1" };
+
+// Parses a simple `translate(x,y)` string into ["x","y"], or null if it
+// isn't one. Deliberately narrow -- per task-12 fix-review, "do not try to
+// parse arbitrary transform lists" (scale/rotate/matrix/multi-transform
+// values are out of scope; every animateTransform in this codebase that
+// needs checking is a plain translate).
+function parseTranslate(s) {
+  const m = /^translate\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)$/.exec(s || "");
+  return m ? [m[1], m[2]] : null;
+}
 
 export function assertAnimationsMatchBaseValues(svg) {
   const body = svg.replace(/<!--[\s\S]*?-->/g, "");
@@ -74,7 +98,7 @@ export function assertAnimationsMatchBaseValues(svg) {
       continue;
     }
     const attrs = parseAttrs(attrText);
-    if (name === "animate" && VISIBILITY_ATTRS.has(attrs.attributeName)) {
+    if (name === "animate" && SCALAR_ATTRS.has(attrs.attributeName)) {
       const attrName = attrs.attributeName;
       const parent = stack[stack.length - 1];
       assert.ok(parent, `<animate attributeName="${attrName}"> has no enclosing element`);
@@ -92,6 +116,45 @@ export function assertAnimationsMatchBaseValues(svg) {
           `value, so the two must agree or the element renders wrong (or invisible) in every README`
       );
       checked += 1;
+    }
+    // Not every animateTransform-driven element declares a base `transform`
+    // -- unlike opacity, SVG has no single meaningful default translate to
+    // fall back on, and at least one purely decorative element in this
+    // codebase (card.mjs's scan-beam sweep) intentionally has none. Where a
+    // base transform IS declared, though, it is held to the exact same
+    // rule as every other attribute above.
+    if (name === "animateTransform" && attrs.attributeName === "transform" && attrs.type === "translate") {
+      const parent = stack[stack.length - 1];
+      assert.ok(parent, `<animateTransform attributeName="transform"> has no enclosing element`);
+      const baseTransform = parent.attrs.transform;
+      if (baseTransform !== undefined) {
+        const baseXY = parseTranslate(baseTransform);
+        assert.ok(
+          baseXY,
+          `<${parent.name}> has a base transform "${baseTransform}" that isn't a simple translate(x,y) -- can't compare`
+        );
+        const firstSample = (attrs.values || "").split(";")[0]?.trim();
+        const firstXY = parseTranslate(`translate(${firstSample})`);
+        assert.ok(
+          firstXY,
+          `<${parent.name}> animates transform starting at "${firstSample}", which isn't a simple "x,y" pair -- can't compare`
+        );
+        assert.equal(
+          Number(firstXY[0]),
+          Number(baseXY[0]),
+          `<${parent.name}> animates transform starting at x=${firstXY[0]} but its base transform's x is ` +
+            `${baseXY[0]} -- an <img>-embedded SVG freezes at the animation's first sample, ignoring the base ` +
+            `value, so the two must agree or the element renders in the wrong place in every README`
+        );
+        assert.equal(
+          Number(firstXY[1]),
+          Number(baseXY[1]),
+          `<${parent.name}> animates transform starting at y=${firstXY[1]} but its base transform's y is ` +
+            `${baseXY[1]} -- an <img>-embedded SVG freezes at the animation's first sample, ignoring the base ` +
+            `value, so the two must agree or the element renders in the wrong place in every README`
+        );
+        checked += 1;
+      }
     }
     if (selfClosing !== "/") {
       stack.push({ name, attrs });

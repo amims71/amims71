@@ -175,14 +175,12 @@ function buildGlider(weeks, scale, geo) {
   const xStart = GEOM.gridX + 10;
   const xEnd = GEOM.gridX + gridW - 10;
   const s = probeSchedule(weeks, scale, geo);
-  const kt = s.keyTimes.join(";");
 
   // Park the glider under the busiest day at rest, and derive the resting
   // beam's y2/stroke/width/r from that same target -- instead of schedule
-  // index 0 (week 0's target) -- so at rest the beam visibly connects the
-  // parked glider to the highlighted cell (task-12). The animateTransform
-  // keyframes and the beam's animated `values` schedules are untouched:
-  // the sweep still starts and ends at the lane's left end when playing.
+  // index 0 (whichever column sits nearest the lane start) -- so at rest
+  // the beam visibly connects the parked glider to the highlighted cell
+  // (task-12).
   const spotlight = findSpotlight(weeks, scale);
   const spotlightTarget = spotlight ? peakTarget(spotlight, step) : null;
   const restX = spotlightTarget ? spotlightTarget.cx : xStart;
@@ -190,6 +188,44 @@ function buildGlider(weeks, scale, geo) {
   const restColor = spotlightTarget ? spotlightTarget.color : s.colors[0];
   const restWidth = spotlightTarget ? spotlightTarget.width : s.widths[0];
   const restDot = spotlightTarget ? spotlightTarget.dot : s.dots[0];
+
+  // Fix-review round 2: setting the base attributes above is NOT enough.
+  // An <img>-embedded SVG freezes every animated attribute at its
+  // animation's first SAMPLE, ignoring the element's base value entirely
+  // (see touchOpacity's comment / task-8-report.md) -- and that rule is
+  // not specific to opacity. The glider's <animateTransform> and the
+  // beam's six <animate>s (y2/stroke/stroke-width, cy/fill/r) all still
+  // had their ORIGINAL schedules, whose first sample is the lane start /
+  // whichever column sits nearest it, not the spotlight target the base
+  // attributes above now point at. A real <img> render therefore kept
+  // showing the glider at the lane start with the old beam, while the
+  // outline and count (opacity-only, and already correctly two-layered)
+  // pointed at the busiest column -- outline, beam and glider disagreeing
+  // about which column they meant.
+  //
+  // The fix, mirrored from the opacity two-layer pattern but expressed as
+  // a single spliced schedule (transform/geometry attributes can't be
+  // split into a separate "rest layer" element the way opacity was):
+  // prepend ONE rest keyframe -- the same spotlight value already used as
+  // the base -- at t=0, and re-time the schedule's existing first sample
+  // to a hair after it. Every original sample is kept, in order, just
+  // shifted one slot later; nothing is replaced or dropped, so the sweep
+  // still runs exactly as before once anything actually animates.
+  //
+  // The epsilon is normally 0.0008 (matching REST_KEYTIMES elsewhere), but
+  // clamped below half of the schedule's own second keyTime so it can
+  // never collide with -- or reorder past -- the first real sample even
+  // for an implausibly dense column count; real GitHub calendars are
+  // always ~53 columns; keyTimes[1] there is ~0.0066, comfortably clear.
+  const nextT = s.keyTimes.length > 1 ? Number(s.keyTimes[1]) : 1;
+  const restEpsilon = Math.min(0.0008, nextT / 2).toFixed(4);
+  const kt = ["0", restEpsilon, ...s.keyTimes.slice(1)].join(";");
+  const y2Values = [restY2, ...s.y2].join(";");
+  const colorValues = [restColor, ...s.colors].join(";");
+  const widthValues = [restWidth, ...s.widths].join(";");
+  const dotValues = [restDot, ...s.dots].join(";");
+  const gliderKt = `0;${restEpsilon};0.5;1`;
+  const gliderValues = `${restX},${laneY}; ${xStart},${laneY}; ${xEnd},${laneY}; ${xStart},${laneY}`;
 
   // One count label per column that gets a peak marker (level >= 3, the
   // same gate buildPeakMarkers uses). Two layers per the task-12 pattern:
@@ -215,16 +251,16 @@ function buildGlider(weeks, scale, geo) {
   return `
   <line x1="${GEOM.gridX}" y1="${laneY}" x2="${GEOM.gridX + gridW}" y2="${laneY}" stroke="${THEME.line}" stroke-width="1" stroke-dasharray="2 4" opacity="0.5"/>
   <g class="glider" transform="translate(${restX},${laneY})" filter="url(#hGlow)">
-    <animateTransform attributeName="transform" type="translate" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="0;0.5;1" values="${xStart},${laneY}; ${xEnd},${laneY}; ${xStart},${laneY}"/>
+    <animateTransform attributeName="transform" type="translate" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${gliderKt}" values="${gliderValues}"/>
     <line x1="0" y1="0" x2="0" y2="${restY2}" stroke="${restColor}" stroke-width="${restWidth}" stroke-linecap="round" opacity="0.85">
-      <animate attributeName="y2" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.y2.join(";")}"/>
-      <animate attributeName="stroke" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.colors.join(";")}"/>
-      <animate attributeName="stroke-width" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.widths.join(";")}"/>
+      <animate attributeName="y2" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${y2Values}"/>
+      <animate attributeName="stroke" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${colorValues}"/>
+      <animate attributeName="stroke-width" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${widthValues}"/>
     </line>
     <circle cx="0" cy="${restY2}" r="${restDot}" fill="${restColor}">
-      <animate attributeName="cy" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.y2.join(";")}"/>
-      <animate attributeName="fill" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.colors.join(";")}"/>
-      <animate attributeName="r" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.dots.join(";")}"/>
+      <animate attributeName="cy" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${y2Values}"/>
+      <animate attributeName="fill" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${colorValues}"/>
+      <animate attributeName="r" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${dotValues}"/>
     </circle>
     <g transform="scale(1.4)">
       <ellipse cx="0" cy="0" rx="14" ry="6" fill="url(#gliderGlow)"/>

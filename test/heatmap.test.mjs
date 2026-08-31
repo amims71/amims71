@@ -426,6 +426,86 @@ test("buildHeatmapSvg's opacity animations still agree with their base values af
   assert.ok(checked > 55, `expected more opacity/width animations to be checked than the pre-task-12 baseline of 55 (got ${checked})`);
 });
 
+// Fix-review round 2 caught this "one level deeper" than opacity: buildGlider
+// set the glider's base `transform` and the beam's base y2/stroke/stroke-width
+// (line) and cy/fill/r (circle) to the spotlight target, but left every one of
+// those attributes' own <animate>/<animateTransform> `values` schedules
+// starting at the OLD first sample (the lane start / week-0 target). An
+// <img>-embedded SVG freezes at an animation's first SAMPLE, not its
+// element's base value (see touchOpacity's comment / task-8-report.md), and
+// that rule is not specific to opacity -- it applies to every animated
+// attribute. So in a real <img> render the base transform/y2/cy/r were
+// cosmetic: the glider still rendered at the lane's left end while the
+// outline and count (opacity-only, and therefore already correctly fixed)
+// pointed at the busiest column -- three different columns disagreeing with
+// each other on screen. This test inspects the animation schedules directly,
+// the same way `assertAnimationsMatchBaseValues` now does after being
+// widened to cover `transform`/y2/cy/r, so a regression here fails loudly
+// instead of only being visible in a manual Chrome <img> render.
+test("buildHeatmapSvg's glider transform and beam geometry animations all start at their own element's base value, not the old lane-start/week-0 sample", () => {
+  const out = svg();
+
+  const gliderOpen = out.match(/<g class="glider" transform="translate\(([^,]+),([^)]+)\)"[^>]*>/);
+  assert.ok(gliderOpen, "glider open tag with a translate(...) base transform not found");
+  const animT = out.match(/<animateTransform attributeName="transform"[^>]*values="([^"]+)"/);
+  assert.ok(animT, "glider animateTransform not found");
+  const [tx, ty] = animT[1].split(";")[0].trim().split(",").map(Number);
+  assert.equal(tx, Number(gliderOpen[1]), "glider animateTransform's first x sample should equal its own base transform's x");
+  assert.equal(ty, Number(gliderOpen[2]), "glider animateTransform's first y sample should equal its own base transform's y");
+
+  const lineOpen = out.match(/<line x1="0" y1="0" x2="0" y2="([^"]+)" stroke="([^"]+)" stroke-width="([^"]+)"[^>]*>/);
+  assert.ok(lineOpen, "beam line open tag not found");
+  const [, baseY2, baseStroke, baseStrokeWidth] = lineOpen;
+  const lineEnd = out.indexOf("</line>", lineOpen.index);
+  const lineBlock = out.slice(lineOpen.index, lineEnd);
+  for (const [attr, base] of [["y2", baseY2], ["stroke", baseStroke], ["stroke-width", baseStrokeWidth]]) {
+    const m = lineBlock.match(new RegExp(`<animate attributeName="${attr}"[^>]*values="([^"]+)"`));
+    assert.ok(m, `no <animate attributeName="${attr}"> found on the beam line`);
+    const first = m[1].split(";")[0].trim();
+    assert.equal(first, base, `beam line's ${attr} animation should start at its own base ${attr} ("${base}")`);
+  }
+
+  const circleOpen = out.match(/<circle cx="0" cy="([^"]+)" r="([^"]+)" fill="([^"]+)">/);
+  assert.ok(circleOpen, "beam circle open tag not found");
+  const [, baseCy, baseR, baseFill] = circleOpen;
+  const circleEnd = out.indexOf("</circle>", circleOpen.index);
+  const circleBlock = out.slice(circleOpen.index, circleEnd);
+  for (const [attr, base] of [["cy", baseCy], ["fill", baseFill], ["r", baseR]]) {
+    const m = circleBlock.match(new RegExp(`<animate attributeName="${attr}"[^>]*values="([^"]+)"`));
+    assert.ok(m, `no <animate attributeName="${attr}"> found on the beam circle`);
+    const first = m[1].split(";")[0].trim();
+    assert.equal(first, base, `beam circle's ${attr} animation should start at its own base ${attr} ("${base}")`);
+  }
+});
+
+test("buildHeatmapSvg's glider/beam animations preserve every original schedule sample after prepending the rest keyframe", () => {
+  const out = svg();
+  const g = geometry(cal.weeks.length);
+  const scale = intensityScale(flattenDays(cal.weeks));
+  const s = probeSchedule(cal.weeks, scale, g);
+
+  const animT = out.match(/<animateTransform attributeName="transform"[^>]*keyTimes="([^"]+)"[^>]*values="([^"]+)"/);
+  assert.ok(animT, "glider animateTransform not found");
+  const gliderKt = animT[1].split(";").map(Number);
+  const gliderVals = animT[2].split(";").map((v) => v.trim());
+  // One extra rest keyframe up front, then the original 3-keyframe sweep
+  // (lane start -> lane end -> lane start) untouched.
+  assert.equal(gliderKt.length, 4);
+  assert.equal(gliderVals.length, 4);
+  for (let i = 1; i < gliderKt.length; i++) assert.ok(gliderKt[i] > gliderKt[i - 1], "glider keyTimes must stay strictly ascending");
+
+  const yAnim = out.match(/<animate attributeName="y2"[^>]*keyTimes="([^"]+)"[^>]*values="([^"]+)"/);
+  assert.ok(yAnim, "beam y2 animation not found");
+  const beamKt = yAnim[1].split(";").map(Number);
+  const beamVals = yAnim[2].split(";");
+  assert.equal(beamKt.length, s.keyTimes.length + 1, "expected exactly one extra (rest) keyframe on top of the original schedule");
+  assert.equal(beamVals.length, s.y2.length + 1, "expected exactly one extra (rest) value on top of the original schedule");
+  // Every original sample, in order, must still be present after the first
+  // (rest) one -- inserting, not replacing.
+  assert.deepEqual(beamVals.slice(1), s.y2, "original y2 schedule samples must be preserved verbatim after the rest keyframe");
+  for (let i = 1; i < beamKt.length; i++) assert.ok(beamKt[i] > beamKt[i - 1], "beam keyTimes must stay strictly ascending");
+});
+
 test("buildHeatmapSvg's glider body is wide enough to fit a 3-digit contribution count", () => {
   const out = svg();
   const bodyRe = new RegExp(`<path d="([^"]+)" fill="${THEME.cyan}" stroke="${THEME.green}" stroke-width="1"/>`);
