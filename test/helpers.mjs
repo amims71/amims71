@@ -127,6 +127,18 @@ export function assertAnimationsMatchBaseValues(svg) {
         `<${parent.name}> animates ${attrName} but has no base ${attrName} attribute and no default is defined`
       );
       const firstSample = (attrs.values || "").split(";")[0]?.trim();
+      // Assert a real first sample exists BEFORE coercing it. Number("") is
+      // 0, so an <animate> whose `values` is missing, empty or whitespace-only
+      // yielded a first sample of "" that compared numerically equal to a base
+      // of exactly "0" -- and passed, counted as checked, having verified
+      // nothing. Every peak marker in the heatmap has base opacity "0", so
+      // that is exactly the shape this artifact is full of. A colour compare
+      // has the same hole via normalizeColor("") === "".
+      assert.ok(
+        typeof firstSample === "string" && firstSample.length > 0,
+        `<${parent.name}> animates ${attrName} but its \`values\` list has no first sample (missing, empty or ` +
+          `whitespace-only) -- an empty first sample coerces to 0 and would silently "match" a base of "0"`
+      );
       const mismatchMsg =
         `<${parent.name}> animates ${attrName} starting at "${firstSample}" but its base ${attrName} is ` +
         `"${baseValue}" -- an <img>-embedded SVG freezes at the animation's first sample, ignoring the base ` +
@@ -148,6 +160,29 @@ export function assertAnimationsMatchBaseValues(svg) {
         assert.equal(firstNum, baseNum, mismatchMsg);
       }
       checked += 1;
+    } else if (name === "animate") {
+      // Same policy as the animateTransform `type` check below, which was
+      // changed to fail loudly for exactly this reason: an <animate> whose
+      // attributeName is not in SCALAR_ATTRS used to be neither checked nor
+      // counted, so `<animate attributeName="height">` (or "x", or
+      // "stop-opacity", or a "cx" typo for the "cy" that IS in the set) could
+      // disagree with its base value in a committed artifact and this guard
+      // would report success. Silently skipping the unrecognised is how a
+      // guard reads as coverage it does not have.
+      //
+      // The known set is deliberately not widened to grandfather anything in:
+      // an audit of every `attributeName=` emitted by src/card.mjs and
+      // src/heatmap.mjs found opacity, width, y2, cy, r, stroke-width,
+      // stroke, fill, stop-color and transform -- so the set below already
+      // covers every <animate> this codebase produces, and there is nothing
+      // "currently unpoliced but harmless" to justify. A new animation target
+      // must be added here, with a numeric-or-colour decision made
+      // deliberately, before it can be used.
+      assert.fail(
+        `unsupported <animate> attributeName "${attrs.attributeName}" -- this guard only knows how to compare ` +
+          `${[...SCALAR_ATTRS].join(", ")}. Add it to NUMERIC_ATTRS or COLOR_ATTRS (deciding which on purpose) ` +
+          `before animating it, or its first-sample-vs-base-value agreement goes completely unchecked`
+      );
     }
     // Not every animateTransform-driven element declares a base `transform`
     // -- unlike opacity, SVG has no single meaningful default translate to

@@ -26,6 +26,45 @@ function calendar(weekCount = 53) {
 const cal = calendar();
 const svg = () => buildHeatmapSvg({ calendar: cal, today: "2026-08-28" });
 
+// The shape production ACTUALLY produces, which the uniform 53x7 = 371
+// fixture above never has: GitHub's window is 53 columns whose final week is
+// partial (measured on the live calendar: a two-day final week, 52*7 + 2 =
+// 366 days), and real data carries outliers (a measured 209-contribution day
+// against a p90 scale in the teens -- the very observation that moved
+// intensityScale off the window maximum). Both properties feed columnPeaks,
+// the month labels, the probe schedule and the glider spotlight, so a suite
+// that only ever sees a uniform rectangle of small numbers is not exercising
+// the artifact it publishes. The last day lands on 2026-08-31, so that is
+// the `today` these tests pass.
+const OUTLIER = { week: 40, day: 3, count: 209 };
+function partialWeekCalendar() {
+  const weeks = [];
+  let n = 0;
+  for (let w = 0; w < 53; w++) {
+    const dayCount = w === 52 ? 2 : 7; // partial final week, as production always has
+    const days = [];
+    for (let d = 0; d < dayCount; d++) {
+      const count = w === OUTLIER.week && d === OUTLIER.day ? OUTLIER.count : (w * 7 + d) % 11;
+      n += count;
+      const day = new Date(Date.UTC(2025, 7, 31) + 0);
+      day.setUTCDate(day.getUTCDate() + w * 7 + d);
+      days.push({ date: day.toISOString().slice(0, 10), contributionCount: count, weekday: d });
+    }
+    weeks.push({ contributionDays: days });
+  }
+  return { totalContributions: n, weeks };
+}
+
+const partialCal = partialWeekCalendar();
+const partialSvg = () => buildHeatmapSvg({ calendar: partialCal, today: "2026-08-31" });
+
+// Both fixtures, so assertions that should hold for any calendar are stated
+// once and checked against both the uniform grid and the real partial shape.
+const bothFixtures = [
+  ["uniform 53x7 fixture", cal, () => svg()],
+  ["partial-final-week fixture", partialCal, () => partialSvg()],
+];
+
 // Mirrors buildHeatmapSvg's internal scale/spotlight derivation exactly
 // (task-12), so tests can independently predict which column the glider
 // should park under without hardcoding a week index or count -- the real
@@ -56,17 +95,23 @@ test("geometry puts the glider lane below the seven day rows", () => {
 });
 
 test("buildHeatmapSvg produces a well-formed, hole-free SVG", () => {
-  const out = svg();
-  assert.ok(out.startsWith("<svg"));
-  assert.ok(out.trimEnd().endsWith("</svg>"));
-  assertBalancedXml(out);
-  assertNoHoles(out);
+  for (const [label, , build] of bothFixtures) {
+    const out = build();
+    assert.ok(out.startsWith("<svg"), label);
+    assert.ok(out.trimEnd().endsWith("</svg>"), label);
+    assertBalancedXml(out);
+    assertNoHoles(out);
+  }
 });
 
 test("buildHeatmapSvg draws one rect per day", () => {
-  const out = svg();
-  const cells = out.match(/class="heat-cell"/g) || [];
-  assert.equal(cells.length, 53 * 7);
+  // Counted from each fixture's own day total rather than hardcoded 53 * 7,
+  // so the partial-final-week fixture (366 days, not 371) is a real
+  // assertion here instead of an exception to it.
+  for (const [label, fixture, build] of bothFixtures) {
+    const cells = build().match(/class="heat-cell"/g) || [];
+    assert.equal(cells.length, flattenDays(fixture.weeks).length, label);
+  }
 });
 
 test("buildHeatmapSvg uses only the five heat-ramp colours for cells", () => {
@@ -115,6 +160,45 @@ test("buildHeatmapSvg draws heat-cells with no reveal animation", () => {
   }
 });
 
+test("buildHeatmapSvg renders a partial final week as its own short column", () => {
+  const out = partialSvg();
+  const days = flattenDays(partialCal.weeks);
+  assert.equal(days.length, 366, "fixture should be 52 full weeks plus a two-day final week");
+  assert.equal((out.match(/class="heat-cell"/g) || []).length, 366);
+
+  // One column per week, including the two-day one, and that last column
+  // carries exactly two cells -- a partial week must not be padded out, and
+  // must not collapse into its neighbour either.
+  const xs = [...out.matchAll(/<rect class="heat-cell" x="(\d+(?:\.\d+)?)"/g)].map((m) => Number(m[1]));
+  const columns = [...new Set(xs)].sort((a, b) => a - b);
+  assert.equal(columns.length, 53);
+  assert.equal(xs.filter((x) => x === columns[52]).length, 2);
+  assertBalancedXml(out);
+  assertNoHoles(out);
+});
+
+test("buildHeatmapSvg spotlights a large outlier day without letting it crush the heat scale", () => {
+  const out = partialSvg();
+  const busiest = busiestPeak(partialCal.weeks);
+  assert.equal(busiest.count, OUTLIER.count, "the outlier should be the window's busiest day");
+  assert.equal(busiest.weekIndex, OUTLIER.week);
+
+  const rest = out.match(/<text class="glider-count-rest"[^>]*>(\d+)</);
+  assert.ok(rest, "glider-count-rest text not found");
+  assert.equal(Number(rest[1]), OUTLIER.count, "the resting glider should show the outlier's own count");
+
+  // The reason intensityScale uses the 90th percentile of active days and not
+  // the window maximum: scaled to 209, ordinary days would all collapse into
+  // the dimmest non-empty shade.
+  const scale = intensityScale(flattenDays(partialCal.weeks));
+  assert.ok(scale < OUTLIER.count, `scale ${scale} should not be the outlier itself`);
+  const fills = [...out.matchAll(/class="heat-cell"[^>]*fill="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(
+    new Set(fills).size >= 4,
+    `expected at least 4 of the 5 heat shades in use, got ${new Set(fills).size} -- the outlier is crushing the scale`
+  );
+});
+
 test("buildHeatmapSvg emits no numeric junk in coordinates", () => {
   const out = svg();
   assert.ok(!/(x|y|cx|cy|width|height)="(NaN|Infinity|-Infinity)"/.test(out));
@@ -133,9 +217,10 @@ test("buildHeatmapSvg emits no numeric junk in coordinates", () => {
 // every opacity/width animation in the SVG, not just this one now-deleted
 // mechanism.
 test("buildHeatmapSvg's opacity/width animations agree with their base attribute values (an <img>-embedded SVG freezes at the first sample, not the base -- see task-8-report.md)", () => {
-  const out = svg();
-  const checked = assertAnimationsMatchBaseValues(out);
-  assert.ok(checked > 0, "expected at least one opacity/width animation to check -- a guard that checks nothing passes vacuously");
+  for (const [label, , build] of bothFixtures) {
+    const checked = assertAnimationsMatchBaseValues(build());
+    assert.ok(checked > 0, `${label}: expected at least one opacity/width animation to check -- a guard that checks nothing passes vacuously`);
+  }
 });
 
 // Regression: the 53-week window can open mid-month (e.g. the real GitHub

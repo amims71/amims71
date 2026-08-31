@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import { assertBalancedXml, assertNoHoles, assertAnimationsMatchBaseValues } from "./helpers.mjs";
 
 const root = new URL("../", import.meta.url);
 const read = (rel) => readFile(new URL(rel, root), "utf8");
@@ -45,10 +46,20 @@ const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.]{2,}/;
 // test below, which exists so that regression fails loudly, not silently.
 // (That test builds its fixture addresses from parts, on purpose: writing
 // the domain suffix directly here would itself trip the guard below.)
+//
+// The second entry -- the bot committer address in
+// .github/workflows/cards.yml -- had the same hole and is now anchored the
+// same way. Both anchors admit `"` as well as whitespace and the string
+// boundary, because that address appears inside double quotes in the YAML
+// (`git config user.email "..."`), so a whitespace-only anchor would stop
+// whitelisting the one genuine occurrence. Anchoring matters because a strip
+// DELETES text: wherever the literal overlaps a real address, deleting it is
+// what hides that address from the scan below. See "the bot-address email
+// whitelist is anchored" for both overlap directions.
 function stripWhitelistedEmails(text) {
   return text
     .replace(/amims71@github(?=\s|$)/g, "")
-    .replace(/github-actions\[bot\]@users\.noreply\.github\.com/g, "");
+    .replace(/(?<=^|[\s"])github-actions\[bot\]@users\.noreply\.github\.com(?=\s|"|$)/g, "");
 }
 
 function containsEmail(text) {
@@ -86,13 +97,23 @@ function escapeRegex(s) {
 // manufacture false positives. Confirmed-renders-as-a-link is the bar for
 // admitting a rule here; that is also why the unconfirmed split-reference
 // form (`[Name]` newline `[1]` with `[1]: url`) stays unchased.
+//
+// That rule's prefix class is `[\s*_~(]`, not whitespace alone, and the
+// difference is measured rather than guessed: 34 candidate prefixes were put
+// through GitHub's markdown API, and `(`, `*`, `_` and `~` each still yield a
+// live anchor while every other probed character (`[`, `>`, `"`, `'`, `-`,
+// `.`, `/`, `:`, `!`, a backtick, `{`, `|`, `+`, `=`, `,`, `;`, `#`, `&`,
+// `\\`, `@`, digits, letters, `)`, `]`, `}`, `<`) does not. That is the
+// delimiter set the GFM spec itself states, so this class is closed-form and
+// bounded in BOTH directions -- see the four `after ...` tests and the
+// "leaves as plain text" boundary test below, which pin each side.
 const LINK_SYNTAX = [
   [/\]\(/, "inline-link marker `](`"],
   [/\]\[/, "reference-link marker `][`"],
   [/<a\b/i, "HTML anchor tag"],
   [/\b[a-z][a-z0-9+.-]*:\/\//i, "URL scheme"],
   [/(^|\s)\/\//, "protocol-relative URL"],
-  [/(^|\s)www\./i, "bare `www.` autolink host"],
+  [/(^|[\s*_~(])www\./i, "bare `www.` autolink host"],
 ];
 
 // Asserts that `name` is never linked, keyed on link syntax rather than on
@@ -179,12 +200,95 @@ test("the shell-prompt email whitelist is anchored, not a blanket exemption", ()
   );
 });
 
+test("the bot-address email whitelist is anchored, not a blanket exemption", () => {
+  // Built from parts for the same reason as the test above: this file is
+  // itself scanned by "no email address appears anywhere in the repo", and a
+  // contiguous literal here would be a fixture that depends on the very
+  // whitelist under test.
+  const bot = "github-actions[bot]" + "@" + "users.noreply.github.com";
+
+  // The single real occurrence is .github/workflows/cards.yml's
+  // `git config user.email "..."`, where the address sits INSIDE double
+  // quotes -- so both anchors must admit `"`. The shell-prompt entry above
+  // gets away with `(?=\s|$)` because a prompt is always followed by
+  // whitespace; copying that shape here would un-whitelist the genuine
+  // workflow line and fail the C4 scan on a legitimate file.
+  assert.equal(containsEmail(`git config user.email "${bot}"`), false, "the genuine YAML line must still read as non-email");
+  assert.equal(containsEmail(bot), false, "the bare bot address must still be whitelisted");
+
+  // ...and the hole the anchors close. An unanchored strip deletes the
+  // literal wherever it appears -- including where it overlaps a genuine
+  // address -- and it is the deletion that hides that address from the scan:
+  //   left overlap:  "x@notify." + bot  strips back to "x@notify.", which is
+  //                  no longer an address -- while the unstripped text does
+  //                  contain one (local part "x", host "notify" dot "github");
+  //   right overlap: bot + "@example.test" strips back to "@example.test",
+  //                  which has no local part -- while the unstripped text does
+  //                  contain one (the bot host as the local part of a genuine
+  //                  address at example.test).
+  // Both are spelled as concatenations, never as one literal, so this comment
+  // is not itself an address for the repo-wide scan to find.
+  // (The review's own example, "notify-" + bot, is NOT one of these: a local
+  // part cannot end in "]", so EMAIL_PATTERN never matched that form with or
+  // without the strip. The hole is real, but this is the shape it takes.)
+  assert.equal(
+    containsEmail("x@notify." + bot),
+    true,
+    "a genuine address whose domain runs into the whitelisted literal must survive the strip"
+  );
+  assert.equal(
+    containsEmail(bot + "@example.test"),
+    true,
+    "a genuine address whose local part runs out of the whitelisted literal must survive the strip"
+  );
+});
+
 test("no phone number appears anywhere in the repo", async () => {
-  const files = textFiles().filter((f) => !f.endsWith(".svg")); // coordinate soup, checked by card.test.mjs instead
+  // .svg is excluded here only because an unanchored digit run matches SVG
+  // coordinate soup; the committed SVGs are scanned with the same anchored
+  // pattern by "both committed SVGs pass every structural and animation
+  // guard, on disk" below. (This used to claim card.test.mjs covered them --
+  // it does not: card.test.mjs scans a card built from a synthetic fixture,
+  // never the committed file, and never touches heatmap.svg at all.)
+  const files = textFiles().filter((f) => !f.endsWith(".svg"));
   assert.ok(files.length > 0, "expected to scan at least one tracked text file");
   for (const f of files) {
     const hit = (await read(f)).match(/\+\d[\d\s().-]{9,}/);
     assert.equal(hit, null, `${f} contains a phone-like string: ${hit && hit[0]}`);
+  }
+});
+
+// The committed pair IS the deliverable -- GitHub renders card.svg and
+// heatmap.svg, not the in-memory SVGs that card.test.mjs and
+// heatmap.test.mjs build from synthetic fixtures. Before this test, exactly
+// two tests opened those files at all (the C4 email scan and the "exactly
+// two SVGs" filename assertion), so assertBalancedXml, assertNoHoles and
+// assertAnimationsMatchBaseValues -- the three guards encoding everything
+// this project learned the hard way about how an <img>-embedded SVG renders
+// -- had never run against a single published byte. The workflow was
+// deliberately ordered to generate BEFORE it tests so CI validates what it
+// is about to commit; that ordering only buys anything if a test actually
+// reads the artifacts off disk. This is that test.
+test("both committed SVGs pass every structural and animation guard, on disk", async () => {
+  for (const name of ["card.svg", "heatmap.svg"]) {
+    const svg = await read(name);
+    assert.ok(svg.startsWith("<svg"), `${name} does not start with <svg`);
+    assert.ok(svg.trimEnd().endsWith("</svg>"), `${name} does not end with </svg>`);
+    assertBalancedXml(svg);
+    assertNoHoles(svg);
+    // Measured on the current pair: card.svg checks 3 (the LIVE-dot opacity
+    // blink plus two gradient stop-colours; its scan-beam animateTransform
+    // has no base transform by design, so it is correctly not counted) and
+    // heatmap.svg checks 95. Asserted as `> 0` rather than pinned to those
+    // numbers because both scale with live calendar data -- the point of the
+    // assertion is that the guard inspected something, so it cannot report
+    // success over a file it never parsed.
+    const checked = assertAnimationsMatchBaseValues(svg);
+    assert.ok(checked > 0, `${name}: the animation guard checked nothing, so it passed vacuously`);
+    // Same anchored pattern the repo-wide phone scan uses, applied here
+    // because that scan skips .svg (see its comment).
+    const phone = svg.match(/\+\d[\d\s().-]{9,}/);
+    assert.equal(phone, null, `${name} contains a phone-like string: ${phone && phone[0]}`);
   }
 });
 
@@ -378,6 +482,41 @@ test("private-project link guard rejects a bare www. autolink host", () => {
   // link to private work on the profile page.
   const md = "**XP Track** `[private]` see www.example.com/xp-track\n";
   assert.throws(() => assertNeverLinked("XP Track", md), /autolink host/);
+});
+
+// GFM's `www.` autolink is not delimited by whitespace alone. A later review
+// round put 34 candidate prefixes through GitHub's own markdown API: `(`, `*`,
+// `_` and `~` each still render a live anchor, while `[`, `>`, `"`, `'`, `-`,
+// `.`, `/`, `:`, `!`, a backtick, `{`, `|`, `+`, `=`, `,`, `;`, `#`, `&`, `\`,
+// `@`, digits, letters, `)`, `]`, `}` and `<` do not. That set is exactly the
+// delimiter set the GFM spec states for the autolink extension, so
+// `(^|[\s*_~(])www\.` is closed-form -- not one more round of enumerating
+// syntaxes. Each of the four prefixes below walked straight through the
+// previous `(^|\s)www\.` rule; one test each, so a partial regression names
+// which prefix came back.
+for (const [prefix, label] of [
+  ["(", "an opening parenthesis"],
+  ["*", "an emphasis asterisk"],
+  ["_", "an emphasis underscore"],
+  ["~", "a strikethrough tilde"],
+]) {
+  test(`private-project link guard rejects a bare www. autolink host after ${label}`, () => {
+    const md = `**XP Track** \`[private]\` see ${prefix}www.example.com/xp-track\n`;
+    assert.throws(() => assertNeverLinked("XP Track", md), /autolink host/);
+  });
+}
+
+test("private-project link guard still allows a www. that GFM leaves as plain text", () => {
+  // The other boundary of the same closed form, and the reason the character
+  // class is `[\s*_~(]` rather than `.`: the API probe above confirms a `www.`
+  // preceded by a word character, `-` or `[` is NOT auto-linked, so a rule
+  // that fired on those would only manufacture false positives. Deliberately
+  // passes both before and after the character-class widening -- it exists to
+  // pin the upper bound, not to catch the old rule.
+  for (const prefix of ["x", "4", "-", "["]) {
+    const md = `**XP Track** \`[private]\` see ${prefix}www.example.com/xp-track\n`;
+    assert.doesNotThrow(() => assertNeverLinked("XP Track", md), `prefix "${prefix}" should stay allowed`);
+  }
 });
 
 test("private-project link guard allows a bare scheme-less host, which GFM does not link", () => {

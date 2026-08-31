@@ -28,8 +28,21 @@ test("resolveToken falls back to GITHUB_TOKEN", () => {
   assert.equal(resolveToken({ GITHUB_TOKEN: "b" }), "b");
 });
 
+// Not hypothetical: this IS the first-run configuration. cards.yml passes
+// `GH_TOKEN: ${{ secrets.GH_TOKEN }}`, and a secret that has not been created
+// interpolates to the empty string rather than being left unset -- so the
+// generator's very first scheduled run sees GH_TOKEN="" with a real
+// GITHUB_TOKEN beside it. `||` (not `??`, and not an `in` check) is what makes
+// that fall through to the token that actually exists; a "more correct"
+// nullish-coalescing rewrite would send `Bearer ` and fail every run with a
+// 401 until someone added the secret.
+test("resolveToken treats an empty GH_TOKEN as absent, which is the first-run case", () => {
+  assert.equal(resolveToken({ GH_TOKEN: "", GITHUB_TOKEN: "b" }), "b");
+});
+
 test("resolveToken throws when neither token is present", () => {
   assert.throws(() => resolveToken({}), /GH_TOKEN|GITHUB_TOKEN/);
+  assert.throws(() => resolveToken({ GH_TOKEN: "", GITHUB_TOKEN: "" }), /GH_TOKEN|GITHUB_TOKEN/);
 });
 
 test("fetchCalendar returns the calendar on success", async () => {
