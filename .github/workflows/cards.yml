@@ -1,0 +1,54 @@
+name: Refresh profile cards
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - avatar.png
+      - generate.mjs
+      - src/**
+      - package.json
+      - package-lock.json
+      - .github/workflows/cards.yml
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      # Generate before test, not after: test/repo-guards.test.mjs reads
+      # card.svg and heatmap.svg from disk and is what enforces the C4
+      # email/phone scan over the published artifacts (plus the "exactly
+      # two SVGs" assertion). Generating first means the tests below run
+      # against the same SVGs this job is about to commit, not yesterday's.
+      #
+      # GH_TOKEN is an optional repository secret. It is only needed if the
+      # default GITHUB_TOKEN cannot resolve the private-inclusive contribution
+      # calendar; see the spec's "Open risk" note in §7. The generator prefers
+      # GH_TOKEN and falls back to GITHUB_TOKEN.
+      - run: npm run generate
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: npm test
+
+      - name: Commit regenerated cards
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add card.svg heatmap.svg
+          git diff --staged --quiet || git commit -m "chore: refresh profile cards"
+          git push
