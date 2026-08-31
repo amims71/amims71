@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { THEME } from "../src/theme.mjs";
 import { GEOM, geometry, buildHeatmapSvg, GLIDER_DUR, columnPeaks, probeSchedule, touchOpacity } from "../src/heatmap.mjs";
+import { flattenDays, intensityScale } from "../src/contributions.mjs";
 import { assertBalancedXml, assertNoHoles, assertAnimationsMatchBaseValues } from "./helpers.mjs";
 
 // 53 weeks x 7 days with a deterministic, varied distribution.
@@ -24,6 +25,17 @@ function calendar(weekCount = 53) {
 
 const cal = calendar();
 const svg = () => buildHeatmapSvg({ calendar: cal, today: "2026-08-28" });
+
+// Mirrors buildHeatmapSvg's internal scale/spotlight derivation exactly
+// (task-12), so tests can independently predict which column the glider
+// should park under without hardcoding a week index or count -- the real
+// calendar's busiest day changes as the window rolls, and the fixture above
+// would too if its distribution ever changed.
+function busiestPeak(weeks) {
+  const scale = intensityScale(flattenDays(weeks));
+  const peaks = columnPeaks(weeks, scale);
+  return peaks.reduce((best, p) => (p.count > best.count ? p : best), peaks[0]);
+}
 
 test("GEOM matches the spec's cell metrics", () => {
   assert.equal(GEOM.cell, 11);
@@ -244,22 +256,33 @@ test("buildHeatmapSvg includes the glider and its dashed lane", () => {
 
 // Correction 2: a renderer that does not execute SMIL falls back to base
 // attribute values. The glider's <animateTransform> has no effect there, so
-// the <g class="glider"> needs its own base `transform` -- matching the
-// animation's first keyframe -- or a static render places the glider (and
-// its whole beam) at the SVG origin, on top of the header. See
-// task-7-brief.md Correction 2 and revealClip in src/card.mjs for the
-// established pattern.
-test("buildHeatmapSvg gives the glider group a base transform for static renderers", () => {
+// the <g class="glider"> needs its own base `transform` -- or a static
+// render places the glider (and its whole beam) at the SVG origin, on top
+// of the header. See task-7-brief.md Correction 2 and revealClip in
+// src/card.mjs for the established pattern.
+//
+// task-12 superseded WHERE that base transform points: it used to match the
+// animation's first keyframe (the lane's left end), but an <img>-embedded
+// SVG never animates on screen at all (see task-8-report.md and
+// touchOpacity's comment above), so parking at the lane start showed
+// visitors an idle glider doing nothing. The base now parks the glider
+// under the single busiest day in the whole window instead, so the resting
+// frame -- the only frame most visitors ever see -- shows the beam, the
+// outline, and (task-12) the count all lit up together.
+test("buildHeatmapSvg gives the glider group a base transform for static renderers, parked under the busiest day", () => {
   const out = svg();
   const g = geometry(cal.weeks.length);
   const xStart = GEOM.gridX + 10;
+  const busiest = busiestPeak(cal.weeks);
+  const expectedX = GEOM.gridX + busiest.weekIndex * g.step + GEOM.cell / 2;
   const openTag = out.match(/<g class="glider"[^>]*>/);
   assert.ok(openTag, "glider group not found");
   assert.match(openTag[0], /transform="/, "glider group has no base transform attribute");
   assert.ok(
-    openTag[0].includes(`transform="translate(${xStart},${g.laneY})"`),
-    `glider base transform should park it at the lane start: ${openTag[0]}`
+    openTag[0].includes(`transform="translate(${expectedX},${g.laneY})"`),
+    `glider base transform should park it under the busiest column's centre (x=${expectedX}), not the lane start: ${openTag[0]}`
   );
+  assert.notEqual(expectedX, xStart, "fixture's busiest column should not coincide with the lane start, or this test can't tell the two apart");
 });
 
 test("buildHeatmapSvg flashes amber markers only on bright peak days", () => {
@@ -322,4 +345,116 @@ test("buildHeatmapSvg uses only palette colours -- no raw hex literals outside T
   for (const hex of hexes) {
     assert.ok(known.has(hex), `colour literal ${hex} is not in THEME`);
   }
+});
+
+// --- Task 12: contribution count inside the glider, spotlight at rest ---
+//
+// The owner asked, after seeing a render, for the beam's target cell's
+// contribution count to show inside the glider's diamond. Because an <img>-
+// embedded SVG never animates on screen (see task-8-report.md and
+// touchOpacity's comment above), a count that only appeared mid-sweep would
+// never be seen on the profile -- so this also parks the glider under the
+// single busiest day at rest, with its count already showing.
+
+test("buildHeatmapSvg shows each spotlighted column's own contribution count in its glider-count label", () => {
+  const out = svg();
+  const scale = intensityScale(flattenDays(cal.weeks));
+  const peaks = columnPeaks(cal.weeks, scale).filter((p) => p.level >= 3);
+  assert.ok(peaks.length > 0, "fixture should have at least one level>=3 peak to test against");
+  const counts = [...out.matchAll(/<text class="glider-count" [^>]*>(\d+)</g)].map((m) => Number(m[1]));
+  const expected = peaks.map((p) => p.count).sort((a, b) => a - b);
+  assert.deepEqual(counts.slice().sort((a, b) => a - b), expected);
+});
+
+test("buildHeatmapSvg emits exactly one glider-count label per peak-marker", () => {
+  const out = svg();
+  const markers = out.match(/class="peak-marker"/g) || [];
+  // Exact quoted match -- must not also count class="glider-count-rest".
+  const counts = out.match(/class="glider-count"/g) || [];
+  assert.ok(markers.length > 0, "no peak markers emitted");
+  assert.equal(counts.length, markers.length);
+});
+
+test("buildHeatmapSvg's spotlight beam is derived from the busiest column, not week 0", () => {
+  const out = svg();
+  const g = geometry(cal.weeks.length);
+  const busiest = busiestPeak(cal.weeks);
+  const expectedY = GEOM.gridY + busiest.weekday * g.step + GEOM.cell / 2;
+  const expectedY2 = (-(g.laneY - expectedY)).toFixed(1);
+  const gliderTag = out.match(/<g class="glider"[\s\S]*?<\/g>\s*<\/g>/)[0];
+  assert.ok(gliderTag.includes(`y2="${expectedY2}"`), `expected the resting beam's y2 to target the busiest column (${expectedY2}): ${gliderTag.slice(0, 400)}`);
+});
+
+test("buildHeatmapSvg emits exactly one spotlight-marker and one glider-count-rest, lit at rest", () => {
+  const out = svg();
+  const markers = [...out.matchAll(/<rect class="spotlight-marker"[^>]*opacity="([^"]+)"/g)];
+  assert.equal(markers.length, 1, "expected exactly one spotlight-marker");
+  assert.equal(markers[0][1], "1", "spotlight-marker should be lit (opacity 1) at rest");
+
+  const rests = [...out.matchAll(/<text class="glider-count-rest"[^>]*opacity="([^"]+)"/g)];
+  assert.equal(rests.length, 1, "expected exactly one glider-count-rest");
+  assert.equal(rests[0][1], "1", "glider-count-rest should be lit (opacity 1) at rest");
+});
+
+test("buildHeatmapSvg's glider-count-rest text shows the busiest column's exact count", () => {
+  const out = svg();
+  const busiest = busiestPeak(cal.weeks);
+  const m = out.match(/<text class="glider-count-rest"[^>]*>(\d+)</);
+  assert.ok(m, "glider-count-rest text not found");
+  assert.equal(Number(m[1]), busiest.count);
+});
+
+test("buildHeatmapSvg's rest-layer spotlight elements (spotlight-marker, glider-count-rest) hide themselves once anything animates", () => {
+  const out = svg();
+  for (const cls of ["spotlight-marker", "glider-count-rest"]) {
+    const re = new RegExp(`<(?:rect|text) class="${cls}"[^>]*>[\\s\\S]*?<animate attributeName="opacity"[^>]*values="([^"]+)"`);
+    const m = out.match(re);
+    assert.ok(m, `no opacity animation found on .${cls}`);
+    const values = m[1].split(";");
+    assert.equal(values[0], "1", `.${cls} rest animation should start lit (opacity 1)`);
+    assert.equal(values[values.length - 1], "0", `.${cls} rest animation should end hidden (opacity 0)`);
+  }
+});
+
+test("buildHeatmapSvg's opacity animations still agree with their base values after task-12 (many more elements now checked)", () => {
+  const out = svg();
+  const checked = assertAnimationsMatchBaseValues(out);
+  // Baseline before task-12 (cells + peak-markers + border/blink animations,
+  // no glider-count/spotlight-marker/glider-count-rest yet) was 55 for this
+  // fixture. Assert it grew, so this guard is verifiably covering the new
+  // elements and not passing vacuously on the old set.
+  assert.ok(checked > 55, `expected more opacity/width animations to be checked than the pre-task-12 baseline of 55 (got ${checked})`);
+});
+
+test("buildHeatmapSvg's glider body is wide enough to fit a 3-digit contribution count", () => {
+  const out = svg();
+  const bodyRe = new RegExp(`<path d="([^"]+)" fill="${THEME.cyan}" stroke="${THEME.green}" stroke-width="1"/>`);
+  const bodyMatch = out.match(bodyRe);
+  assert.ok(bodyMatch, "glider body path not found");
+  const xs = [...bodyMatch[1].matchAll(/(-?\d+(?:\.\d+)?),-?\d+(?:\.\d+)?/g)].map(([, x]) => Number(x));
+  assert.ok(xs.length > 0, "no coordinates parsed out of the glider body path");
+  const bodyWidth = Math.max(...xs) - Math.min(...xs);
+
+  const fontSizeMatch = out.match(/class="glider-count" x="0" y="0"[^>]*font-size="(\d+(?:\.\d+)?)"/);
+  assert.ok(fontSizeMatch, "glider-count font-size not found");
+  const fontSize = Number(fontSizeMatch[1]);
+
+  // The widest label in real data is 3 digits (e.g. "209" -- see
+  // task-12-brief.md). Estimate its rendered width the same way the brief
+  // does: digits * font-size * 0.6.
+  const digits = 3;
+  const estimatedWidth = digits * fontSize * 0.6;
+  assert.ok(
+    estimatedWidth < bodyWidth,
+    `estimated ${digits}-digit label width ${estimatedWidth} does not comfortably fit inside the glider body's width ${bodyWidth}`
+  );
+});
+
+// The cockpit dot's job (marking the diamond's centre) is now done by the
+// count text that occupies the same spot -- a leftover dot would visually
+// collide with the digits it's supposed to be legible against.
+test("buildHeatmapSvg's glider no longer draws a separate cockpit dot", () => {
+  const out = svg();
+  const gliderTag = out.match(/<g class="glider"[\s\S]*?<\/g>\s*<\/g>/)[0];
+  assert.ok(!/<circle cx="0" cy="0" r="2\.2"/.test(gliderTag), "cockpit dot should be removed -- the count text occupies its spot now");
 });

@@ -60,18 +60,48 @@ function ascending(times) {
   return out;
 }
 
-export function probeSchedule(weeks, scale, { step, laneY, gridW }) {
+// Where the beam tip points for one column's peak day, and how it should
+// look when it gets there. Factored out of probeSchedule so buildGlider can
+// compute the identical target for the spotlight column (task-12) without
+// duplicating the hit/color/width/dot rules.
+function peakTarget(peak, step) {
   const topY = GEOM.gridY + GEOM.cell / 2;
-  const targets = columnPeaks(weeks, scale).map((peak) => {
-    const hit = peak.level >= 3;
-    return {
-      cx: GEOM.gridX + peak.weekIndex * step + GEOM.cell / 2,
-      y: hit ? GEOM.gridY + peak.weekday * step + GEOM.cell / 2 : topY,
-      color: hit ? THEME.heat[peak.level] : THEME.cyan,
-      width: peak.level === 4 ? "2.6" : peak.level === 3 ? "2" : "1.1",
-      dot: peak.level === 4 ? "3.4" : peak.level === 3 ? "2.6" : "1.6",
-    };
-  });
+  const hit = peak.level >= 3;
+  return {
+    cx: GEOM.gridX + peak.weekIndex * step + GEOM.cell / 2,
+    y: hit ? GEOM.gridY + peak.weekday * step + GEOM.cell / 2 : topY,
+    color: hit ? THEME.heat[peak.level] : THEME.cyan,
+    width: peak.level === 4 ? "2.6" : peak.level === 3 ? "2" : "1.1",
+    dot: peak.level === 4 ? "3.4" : peak.level === 3 ? "2.6" : "1.6",
+  };
+}
+
+// The single busiest day in the whole window -- not merely the brightest
+// *level*, since several columns commonly share level 4 (see columnPeaks).
+// Used (task-12) to park the resting glider under a cell a visitor can
+// actually see lit up, instead of the inert lane-start position: an <img>-
+// embedded SVG never animates on screen (see touchOpacity's comment below /
+// task-8-report.md), so the resting frame is the only frame most visitors
+// ever see. Returns null when every day in the window is empty.
+function findSpotlight(weeks, scale) {
+  const peaks = columnPeaks(weeks, scale);
+  let best = null;
+  for (const p of peaks) {
+    if (p.count > 0 && (!best || p.count > best.count)) best = p;
+  }
+  return best;
+}
+
+// Rest-layer opacity schedule shared by every task-12 "visible at rest,
+// vanishes once anything animates" element (spotlight-marker,
+// glider-count-rest): lit (1) at t=0, dropping to 0 by t=0.0008 and staying
+// there, frozen. keyTimes must be strictly ascending per SMIL, hence the
+// tiny nudge off of 0 rather than a bare "0;0".
+const REST_KEYTIMES = "0;0.0008;1";
+const REST_VALUES = "1;0;0";
+
+export function probeSchedule(weeks, scale, { step, laneY, gridW }) {
+  const targets = columnPeaks(weeks, scale).map((peak) => peakTarget(peak, step));
 
   const events = [];
   for (const target of targets) {
@@ -141,22 +171,57 @@ export function touchOpacity(xFraction) {
 }
 
 function buildGlider(weeks, scale, geo) {
-  const { gridW, laneY } = geo;
+  const { gridW, laneY, step } = geo;
   const xStart = GEOM.gridX + 10;
   const xEnd = GEOM.gridX + gridW - 10;
   const s = probeSchedule(weeks, scale, geo);
   const kt = s.keyTimes.join(";");
 
+  // Park the glider under the busiest day at rest, and derive the resting
+  // beam's y2/stroke/width/r from that same target -- instead of schedule
+  // index 0 (week 0's target) -- so at rest the beam visibly connects the
+  // parked glider to the highlighted cell (task-12). The animateTransform
+  // keyframes and the beam's animated `values` schedules are untouched:
+  // the sweep still starts and ends at the lane's left end when playing.
+  const spotlight = findSpotlight(weeks, scale);
+  const spotlightTarget = spotlight ? peakTarget(spotlight, step) : null;
+  const restX = spotlightTarget ? spotlightTarget.cx : xStart;
+  const restY2 = spotlightTarget ? (-(laneY - spotlightTarget.y)).toFixed(1) : s.y2[0];
+  const restColor = spotlightTarget ? spotlightTarget.color : s.colors[0];
+  const restWidth = spotlightTarget ? spotlightTarget.width : s.widths[0];
+  const restDot = spotlightTarget ? spotlightTarget.dot : s.dots[0];
+
+  // One count label per column that gets a peak marker (level >= 3, the
+  // same gate buildPeakMarkers uses). Two layers per the task-12 pattern:
+  // an animated layer (base opacity 0, driven by the identical touchOpacity
+  // schedule its marker already uses, so the count appears exactly when its
+  // cell is outlined) and, for the spotlight column only, an extra rest
+  // layer (base opacity 1, values "1;0;0") so the count is visible on an
+  // <img>-embedded SVG that never actually animates on screen. Both sit at
+  // local (0,0) inside the scaled glider group, in the cockpit dot's old
+  // spot -- dark-on-cyan (THEME.bg on THEME.cyan) stays legible; a light
+  // fill would not.
+  let countLabels = "";
+  for (const peak of columnPeaks(weeks, scale)) {
+    if (peak.level < 3) continue;
+    const cx = GEOM.gridX + peak.weekIndex * step + GEOM.cell / 2;
+    const o = touchOpacity(laneFraction(cx, gridW));
+    if (spotlight && peak.weekIndex === spotlight.weekIndex) {
+      countLabels += `<text class="glider-count-rest" x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="700" fill="${THEME.bg}" opacity="1">${peak.count}<animate attributeName="opacity" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${REST_KEYTIMES}" values="${REST_VALUES}" begin="0s" fill="freeze"/></text>`;
+    }
+    countLabels += `<text class="glider-count" x="0" y="0" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="700" fill="${THEME.bg}" opacity="0">${peak.count}<animate attributeName="opacity" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${o.keyTimes.join(";")}" values="${o.values.join(";")}"/></text>`;
+  }
+
   return `
   <line x1="${GEOM.gridX}" y1="${laneY}" x2="${GEOM.gridX + gridW}" y2="${laneY}" stroke="${THEME.line}" stroke-width="1" stroke-dasharray="2 4" opacity="0.5"/>
-  <g class="glider" transform="translate(${xStart},${laneY})" filter="url(#hGlow)">
+  <g class="glider" transform="translate(${restX},${laneY})" filter="url(#hGlow)">
     <animateTransform attributeName="transform" type="translate" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="0;0.5;1" values="${xStart},${laneY}; ${xEnd},${laneY}; ${xStart},${laneY}"/>
-    <line x1="0" y1="0" x2="0" y2="${s.y2[0]}" stroke="${s.colors[0]}" stroke-width="${s.widths[0]}" stroke-linecap="round" opacity="0.85">
+    <line x1="0" y1="0" x2="0" y2="${restY2}" stroke="${restColor}" stroke-width="${restWidth}" stroke-linecap="round" opacity="0.85">
       <animate attributeName="y2" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.y2.join(";")}"/>
       <animate attributeName="stroke" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.colors.join(";")}"/>
       <animate attributeName="stroke-width" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.widths.join(";")}"/>
     </line>
-    <circle cx="0" cy="${s.y2[0]}" r="${s.dots[0]}" fill="${s.colors[0]}">
+    <circle cx="0" cy="${restY2}" r="${restDot}" fill="${restColor}">
       <animate attributeName="cy" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.y2.join(";")}"/>
       <animate attributeName="fill" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.colors.join(";")}"/>
       <animate attributeName="r" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${kt}" values="${s.dots.join(";")}"/>
@@ -165,14 +230,15 @@ function buildGlider(weeks, scale, geo) {
       <ellipse cx="0" cy="0" rx="14" ry="6" fill="url(#gliderGlow)"/>
       <circle cx="-7.5" cy="0" r="2" fill="${THEME.green}" opacity="0.35"><animate attributeName="opacity" values="0.35;1;0.35" dur="0.9s" repeatCount="indefinite"/></circle>
       <circle cx="7.5" cy="0" r="2" fill="${THEME.green}"><animate attributeName="opacity" values="1;0.35;1" dur="0.9s" repeatCount="indefinite"/></circle>
-      <path d="M-9,0 L-3,-5 L3,-5 L9,0 L3,5 L-3,5 Z" fill="${THEME.cyan}" stroke="${THEME.green}" stroke-width="1"/>
-      <circle cx="0" cy="0" r="2.2" fill="${THEME.fg}"/>
+      <path d="M-15,0 L-7,-6 L7,-6 L15,0 L7,6 L-7,6 Z" fill="${THEME.cyan}" stroke="${THEME.green}" stroke-width="1"/>
+      ${countLabels}
     </g>
   </g>`;
 }
 
 function buildPeakMarkers(weeks, scale, geo) {
   const { step, gridW } = geo;
+  const spotlight = findSpotlight(weeks, scale);
   let out = "";
   for (const peak of columnPeaks(weeks, scale)) {
     if (peak.level < 3) continue;
@@ -196,6 +262,17 @@ function buildPeakMarkers(weeks, scale, geo) {
     out +=
       `<rect class="peak-marker" x="${x}" y="${y}" width="${GEOM.cell + 3}" height="${GEOM.cell + 3}" rx="3.5" fill="none" stroke="${THEME.amber}" stroke-width="1.4" opacity="${o.values[0]}">` +
       `<animate attributeName="opacity" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${o.keyTimes.join(";")}" values="${o.values.join(";")}"/></rect>`;
+    if (spotlight && peak.weekIndex === spotlight.weekIndex) {
+      // Rest-layer outline over the single busiest cell, in addition to the
+      // pulsing peak-marker above (task-12): lit at rest (base opacity 1),
+      // vanishing the instant anything animates (values "1;0;0"). Same
+      // geometry and stroke as a normal peak marker so it reads identically
+      // -- it exists only so the outline is visible on an <img>-embedded
+      // SVG, which never actually animates on screen.
+      out +=
+        `<rect class="spotlight-marker" x="${x}" y="${y}" width="${GEOM.cell + 3}" height="${GEOM.cell + 3}" rx="3.5" fill="none" stroke="${THEME.amber}" stroke-width="1.4" opacity="1">` +
+        `<animate attributeName="opacity" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${REST_KEYTIMES}" values="${REST_VALUES}" begin="0s" fill="freeze"/></rect>`;
+    }
   }
   return out;
 }
