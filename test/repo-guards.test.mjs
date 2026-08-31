@@ -59,30 +59,69 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Asserts that `name` is never linked, as a closed-form property instead
-// of an enumeration of link syntaxes. Every prior round of this guard
-// added one more special case (inline link, HTML anchor, explicit
-// reference, shortcut reference) after finding the previous enumeration
-// missed a syntax -- that pattern is itself the evidence that enumerating
-// syntaxes is the wrong shape. The property that actually matters for C5:
-// no line mentioning the name may carry a URL, an HTML anchor tag, or a
-// reference-link marker; the name may not fall inside an HTML anchor span
-// even when that span crosses a line break; and no reference-style
-// definition may resolve the name to a URL, matched case-insensitively
-// per Markdown's own label semantics. This can over-reject (an unrelated
-// URL merely sharing a line with the name) -- that is the safe direction
-// for a guard whose failure mode is silently publishing a link to private
-// work.
+// Link syntax that must never share a line with a private project's name.
+// These key on the *syntax that makes something a link*, never on what the
+// target URL looks like -- that distinction is the whole point. Round 3 of
+// this guard checked lines for `https?://`, believing that to be the
+// "closed form" replacement for an enumeration of link syntaxes. It wasn't:
+// a check for `https?://` is a one-item scheme enumeration in disguise, and
+// five link forms walked through it (protocol-relative `](//host)`, a
+// non-http scheme like `mailto:`/`ftp:`, a scheme-less `](host/path)`, and
+// a case-varied `HTTPS://` that the flagless regex simply didn't see).
+//
+// `](` is the load-bearing rule: it appears in *every* Markdown inline
+// link regardless of the target, so it is scheme-independent by
+// construction. The rest cover the non-inline ways to link: `][` for a
+// reference usage, `<a` for HTML, any `scheme://` for a bare/auto-linked
+// URL under any scheme in any case, and a whitespace- or line-start-
+// prefixed `//` for a bare protocol-relative URL. Do NOT reintroduce a
+// scheme-shaped check here; that is the exact regression this list exists
+// to prevent.
+const LINK_SYNTAX = [
+  [/\]\(/, "inline-link marker `](`"],
+  [/\]\[/, "reference-link marker `][`"],
+  [/<a\b/i, "HTML anchor tag"],
+  [/\b[a-z][a-z0-9+.-]*:\/\//i, "URL scheme"],
+  [/(^|\s)\/\//, "protocol-relative URL"],
+];
+
+// Asserts that `name` is never linked, keyed on link syntax rather than on
+// any property of the target URL. Every prior round of this guard added one
+// more special case (inline link, HTML anchor, explicit reference, shortcut
+// reference, autolink, bare URL) after finding the previous version missed a
+// syntax -- that pattern is itself the evidence that enumerating URL shapes
+// is the wrong shape for the check. The property that actually matters for
+// C5: no line mentioning the name may carry any link syntax at all; the
+// name may not fall inside an HTML anchor span even when that span crosses
+// a line break; anchors must balance, so that span scan is sound rather
+// than blind to an unclosed tag; and no reference-style definition may
+// resolve the name to a URL, matched case-insensitively per Markdown's own
+// label semantics. This can over-reject (an unrelated link merely sharing a
+// line with the name) -- that is the safe direction for a guard whose
+// failure mode is silently publishing a link to an employer's private work.
 function assertNeverLinked(name, md) {
   const esc = escapeRegex(name);
   const lines = md.split("\n").filter((l) => l.includes(name));
   assert.ok(lines.length > 0, `missing project ${name}`);
   assert.ok(lines.some((l) => /\[private\]/.test(l)), `${name} not marked [private]`);
   for (const line of lines) {
-    assert.ok(!/https?:\/\//.test(line), `${name}'s line must carry no URL: ${line}`);
-    assert.ok(!/<a\b/i.test(line), `${name}'s line must carry no HTML anchor tag: ${line}`);
-    assert.ok(!/\]\[/.test(line), `${name}'s line must carry no reference-link marker: ${line}`);
+    for (const [pattern, label] of LINK_SYNTAX) {
+      assert.ok(!pattern.test(line), `${name}'s line must carry no ${label}: ${line}`);
+    }
   }
+
+  // An unclosed anchor is malformed markup and worth failing on by itself,
+  // but it also makes the span scan below structurally blind: the span
+  // regex needs a literal `</a>` to form a match at all, so a name sitting
+  // inside a never-closed anchor would be scanned by a loop with zero
+  // iterations. Asserting the counts balance is what makes that scan sound.
+  const opens = (md.match(/<a\b/gi) ?? []).length;
+  const closes = (md.match(/<\/a\s*>/gi) ?? []).length;
+  assert.equal(
+    opens,
+    closes,
+    `unbalanced HTML anchors: ${opens} <a> vs ${closes} </a> -- malformed markup, and it leaves the anchor-span scan below silently incomplete`
+  );
 
   const flattened = md.replace(/\n/g, " ");
   for (const span of flattened.match(/<a\b[^>]*>.*?<\/a>/gi) ?? []) {
@@ -249,6 +288,76 @@ test("private-project link guard rejects a case-differing reference label", () =
     "",
   ].join("\n");
   assert.throws(() => assertNeverLinked("XP Track", md), /case-insensitive reference/);
+});
+
+// The next five each demonstrate one of the five forms a later review round
+// found evading the round-3 version of this guard. Round 3 had replaced the
+// enumerated syntax checks with a per-line `!/https?:\/\//` URL check --
+// which is itself a one-item scheme enumeration in disguise, so every link
+// whose target isn't spelled with a lowercase `http`/`https` scheme walked
+// straight through. The fix keys on link *syntax* instead: `](` appears in
+// every Markdown inline link no matter what the target looks like, which is
+// scheme-independent by construction. The fifth form is the anchor the span
+// scan cannot see at all, because a span needs a literal `</a>` to exist.
+
+test("private-project link guard rejects a protocol-relative link", () => {
+  // `](//host/path)` -- a real link with no scheme at all, so the old
+  // `https?://` check had nothing to match.
+  const inline = "**XP Track** `[private]`\n\nSee also [XP Track](//example.com/x).\n";
+  assert.throws(() => assertNeverLinked("XP Track", inline), /inline-link marker/);
+
+  // The bare form, which is what the leading-`//` rule exists for: here
+  // there is no `](` to catch it first.
+  const bare = "**XP Track** `[private]` see //example.com/x\n";
+  assert.throws(() => assertNeverLinked("XP Track", bare), /protocol-relative URL/);
+});
+
+test("private-project link guard rejects a non-http URL scheme", () => {
+  // The mailto target is composed from parts on purpose: spelled as one
+  // contiguous literal it would read as an address to this repo's own
+  // "no email address appears anywhere" guard, which scans this file too.
+  const mailtoTarget = "mailto:x" + "@" + "example.test";
+  const mailto = "**XP Track** `[private]`\n\nSee also [XP Track](" + mailtoTarget + ").\n";
+  assert.throws(() => assertNeverLinked("XP Track", mailto), /inline-link marker/);
+
+  const ftpInline = "**XP Track** `[private]`\n\nSee also [XP Track](ftp://example.com/x).\n";
+  assert.throws(() => assertNeverLinked("XP Track", ftpInline), /inline-link marker/);
+
+  // Bare, so the generic `scheme://` rule is the one under test rather
+  // than the inline-link marker.
+  const ftpBare = "**XP Track** `[private]` see ftp://example.com/x\n";
+  assert.throws(() => assertNeverLinked("XP Track", ftpBare), /carry no URL scheme/);
+});
+
+test("private-project link guard rejects a scheme-less link target", () => {
+  const md = "**XP Track** `[private]`\n\nSee also [XP Track](example.com/x).\n";
+  assert.throws(() => assertNeverLinked("XP Track", md), /inline-link marker/);
+});
+
+test("private-project link guard rejects a case-varied URL scheme", () => {
+  // Schemes are case-insensitive in URLs; the old check had no `i` flag.
+  const inline = "**XP Track** `[private]`\n\nSee also [XP Track](HTTPS://example.com/x).\n";
+  assert.throws(() => assertNeverLinked("XP Track", inline), /inline-link marker/);
+
+  const bare = "**XP Track** `[private]` see HTTPS://example.com/x\n";
+  assert.throws(() => assertNeverLinked("XP Track", bare), /carry no URL scheme/);
+});
+
+test("private-project link guard rejects an unclosed HTML anchor", () => {
+  // No `</a>` anywhere, so `<a ...>...</a>` never forms a span and the
+  // whole-document span scan below has nothing to iterate -- the name sits
+  // inside an open anchor that the scan is structurally blind to. Asserting
+  // the tag counts balance is what makes that scan sound rather than
+  // silently incomplete, and an unclosed anchor is malformed markup worth
+  // failing on in its own right.
+  const md = [
+    "**XP Track** `[private]`",
+    "",
+    '<a href="https://example.com">',
+    "XP Track",
+    "",
+  ].join("\n");
+  assert.throws(() => assertNeverLinked("XP Track", md), /unbalanced HTML anchors/);
 });
 
 test("README links the public repos it names", async () => {
