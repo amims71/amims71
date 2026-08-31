@@ -43,23 +43,20 @@ export function buildSections(totalContributions) {
   ];
 }
 
-function revealClip(id, x, y, w, h, delay) {
-  // Base width is the FINAL width, and the animation starts at 0s (holding at
-  // zero, then wiping) rather than being delayed via `begin`. A renderer that
-  // doesn't execute SMIL falls back to the base attribute values, so a
-  // static/non-animating render must show every row fully revealed, not
-  // clipped to nothing (see task-5-report.md, Finding 1).
-  const dur = delay + 0.4;
-  const holdFrac = (delay / dur).toFixed(4);
-  return `<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"><animate attributeName="width" values="0;0;${w}" keyTimes="0;${holdFrac};1" dur="${dur.toFixed(2)}s" begin="0s" fill="freeze" calcMode="spline" keySplines="0 0 1 1;0.3 0 0.2 1"/></rect></clipPath>`;
-}
-
 function layoutRight(sections) {
-  let clips = "";
+  // Rows render unconditionally -- no reveal-clip animation gates their
+  // visibility. Chrome, when this SVG is embedded via <img> (exactly how
+  // GitHub renders README images), does not execute SMIL and does not fall
+  // back to the base attribute either: it freezes the animated attribute at
+  // the animation's first sample. The former revealClip's base width was
+  // the fully-revealed final width, but its animation's first sample was 0,
+  // so every key/value row rendered invisible in every README (see
+  // task-8-report.md, "both artifacts render with their content invisible
+  // on GitHub"). The base value and the animation's first sample must
+  // agree -- the reliable way to guarantee that for a purely cosmetic
+  // reveal is to not animate visibility at all.
   let body = "";
   let y = PANEL_Y + 28;
-  let delay = 0.9;
-  let i = 0;
 
   sections.forEach((section, si) => {
     if (si > 0) {
@@ -69,27 +66,21 @@ function layoutRight(sections) {
     y += TITLE_GAP;
 
     for (const row of section.rows) {
-      const id = `rv${i}`;
-      clips += revealClip(id, RIGHT_X, y - 14, RIGHT_W, 20, delay);
       body +=
-        `<g clip-path="url(#${id})">` +
         `<text x="${RIGHT_X}" y="${y}"><tspan class="kv-label">${row.label}</tspan><tspan class="kv-dots">${row.dots}</tspan></text>` +
-        `<text x="${RIGHT_X + RIGHT_W}" y="${y}" text-anchor="end" class="kv-value">${row.value}</text>` +
-        `</g>`;
+        `<text x="${RIGHT_X + RIGHT_W}" y="${y}" text-anchor="end" class="kv-value">${row.value}</text>`;
       y += LINE_H;
-      delay += 0.08;
-      i += 1;
     }
     if (si < sections.length - 1) y += SECTION_GAP - LINE_H;
   });
 
-  return { clips, body, contentHeight: y - PANEL_Y };
+  return { body, contentHeight: y - PANEL_Y };
 }
 
 export function buildCardSvg({ asciiRows, totalContributions, syncedAt }) {
   const t = THEME;
   const sections = buildSections(totalContributions);
-  const { clips, body, contentHeight } = layoutRight(sections);
+  const { body, contentHeight } = layoutRight(sections);
 
   const panelH = contentHeight + 24;
   const HEIGHT = PANEL_Y + panelH + 62;
@@ -129,7 +120,6 @@ export function buildCardSvg({ asciiRows, totalContributions, syncedAt }) {
     <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
   </filter>
   <clipPath id="frameClip"><rect x="1" y="1" width="${WIDTH - 2}" height="${HEIGHT - 2}" rx="14"/></clipPath>
-  ${clips}
   <style>
     .term-label { fill: ${t.dim}; font-size: 13px; }
     .panel-title { fill: ${t.cyan}; font-size: 12px; font-weight: 700; letter-spacing: 2px; }

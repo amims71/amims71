@@ -143,7 +143,7 @@ function buildGlider(weeks, scale, geo) {
     </circle>
     <g transform="scale(1.4)">
       <ellipse cx="0" cy="0" rx="14" ry="6" fill="url(#gliderGlow)"/>
-      <circle cx="-7.5" cy="0" r="2" fill="${THEME.green}"><animate attributeName="opacity" values="0.35;1;0.35" dur="0.9s" repeatCount="indefinite"/></circle>
+      <circle cx="-7.5" cy="0" r="2" fill="${THEME.green}" opacity="0.35"><animate attributeName="opacity" values="0.35;1;0.35" dur="0.9s" repeatCount="indefinite"/></circle>
       <circle cx="7.5" cy="0" r="2" fill="${THEME.green}"><animate attributeName="opacity" values="1;0.35;1" dur="0.9s" repeatCount="indefinite"/></circle>
       <path d="M-9,0 L-3,-5 L3,-5 L9,0 L3,5 L-3,5 Z" fill="${THEME.cyan}" stroke="${THEME.green}" stroke-width="1"/>
       <circle cx="0" cy="0" r="2.2" fill="${THEME.fg}"/>
@@ -160,8 +160,21 @@ function buildPeakMarkers(weeks, scale, geo) {
     const o = touchOpacity(laneFraction(cx, gridW));
     const x = (GEOM.gridX + peak.weekIndex * step - 1.5).toFixed(1);
     const y = (GEOM.gridY + peak.weekday * step - 1.5).toFixed(1);
+    // Base opacity is o.values[0], not a hardcoded "0". touchOpacity's own
+    // comment documents that a column at either end of the lane can collide
+    // two coincident keyframes at t=0 (or t=1) and deliberately keeps the
+    // brighter one so the pulse still flashes during real SMIL playback --
+    // which means the animation's true first sample is occasionally 1, not
+    // 0 (verified: touchOpacity(0) -> values [1,1,0,0,1,1]). A hardcoded
+    // "0" base would then disagree with that first sample, and an
+    // <img>-embedded SVG (which freezes at the animation's first sample,
+    // not the base) would show a permanently-lit marker at rest whenever
+    // that edge case is hit. Deriving the base straight from the same
+    // array that drives the animation keeps the two in sync by
+    // construction, for every column, without touching touchOpacity's
+    // approved pulse shape at all.
     out +=
-      `<rect class="peak-marker" x="${x}" y="${y}" width="${GEOM.cell + 3}" height="${GEOM.cell + 3}" rx="3.5" fill="none" stroke="${THEME.amber}" stroke-width="1.4" opacity="0">` +
+      `<rect class="peak-marker" x="${x}" y="${y}" width="${GEOM.cell + 3}" height="${GEOM.cell + 3}" rx="3.5" fill="none" stroke="${THEME.amber}" stroke-width="1.4" opacity="${o.values[0]}">` +
       `<animate attributeName="opacity" dur="${GLIDER_DUR}s" repeatCount="indefinite" keyTimes="${o.keyTimes.join(";")}" values="${o.values.join(";")}"/></rect>`;
   }
   return out;
@@ -203,19 +216,16 @@ export function buildHeatmapSvg({ calendar, today }) {
     for (const d of week.contributionDays) {
       const y = GEOM.gridY + d.weekday * step;
       const level = levelFor(d.contributionCount, scale);
-      // Base attribute is the FINAL value (opacity="1"), and the reveal
-      // animation runs from begin="0s" on its own timeline (values/keyTimes)
-      // rather than being delayed via `begin`. A renderer that doesn't
-      // execute SMIL falls back to the base attribute values, so a
-      // static/non-animating render must show every cell fully drawn, not
-      // invisible (see task-5-report.md, Finding 1, and revealClip in
-      // src/card.mjs for the reference pattern).
-      const delay = 0.15 + wi * 0.012;
-      const dur = delay + 0.35;
-      const holdFrac = (delay / dur).toFixed(4);
-      cells +=
-        `<rect class="heat-cell" x="${x}" y="${y}" width="${GEOM.cell}" height="${GEOM.cell}" rx="2.5" fill="${t.heat[level]}" opacity="1">` +
-        `<animate attributeName="opacity" values="0;0;1" keyTimes="0;${holdFrac};1" dur="${dur.toFixed(3)}s" begin="0s" fill="freeze"/></rect>`;
+      // No reveal animation, and no gated visibility. Chrome, when this SVG
+      // is embedded via <img> (exactly how GitHub renders README images),
+      // does not execute SMIL and does not fall back to the base attribute
+      // either: it freezes the animated attribute at the animation's first
+      // sample. The former animation's base opacity was 1 (fully drawn),
+      // but its first sample was 0, so the entire 365-cell grid rendered
+      // invisible in every README (see task-8-report.md). The cells are
+      // drawn plainly instead of relying on any animation whose first
+      // sample and base value must be kept in sync by hand.
+      cells += `<rect class="heat-cell" x="${x}" y="${y}" width="${GEOM.cell}" height="${GEOM.cell}" rx="2.5" fill="${t.heat[level]}" opacity="1"/>`;
     }
   });
 

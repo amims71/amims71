@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { THEME } from "../src/theme.mjs";
 import { PROFILE, ROLES, buildSections, buildCardSvg } from "../src/card.mjs";
-import { assertBalancedXml, assertNoHoles } from "./helpers.mjs";
+import { assertBalancedXml, assertNoHoles, assertAnimationsMatchBaseValues } from "./helpers.mjs";
 
 const asciiRows = Array.from({ length: 42 }, () => "@".repeat(54));
 const svg = () => buildCardSvg({ asciiRows, totalContributions: 5522, syncedAt: "2026-08-28 06:00 UTC" });
@@ -103,16 +103,23 @@ test("buildCardSvg escapes markup in dynamic values", () => {
   assert.ok(!out.includes("<b>"));
 });
 
-test("buildCardSvg keeps reveal-clip rects at full width for static (non-SMIL) renderers", () => {
-  // Regression guard: a base width="0" clip rect would render every row
-  // invisible on a renderer that doesn't execute SMIL animations (see
-  // task-5-report.md, Finding 1). The animation must hold at zero and wipe
-  // to the final width from its own timeline, not gate visibility via the
-  // base attribute value.
+// Superseded regression guard. The former per-row reveal-clip animation had
+// a base width equal to the FINAL width, which was believed sufficient for
+// any renderer that "doesn't execute SMIL". That framing was wrong: Chrome,
+// when this SVG is embedded via <img> (exactly how GitHub renders README
+// images), DOES notice the SMIL but freezes the attribute at the
+// animation's first sample -- which was 0 -- and ignores the base value
+// entirely. Every one of the fourteen key/value rows rendered invisible on
+// github.com/amims71 as a result (see task-8-report.md). The fix removes
+// the reveal-clip mechanism outright rather than trying to pick a base
+// value that happens to match a first sample; the shared guard below is
+// the generic replacement, covering every opacity/width animation in the
+// SVG, not just this one now-deleted mechanism.
+test("buildCardSvg's opacity/width animations agree with their base attribute values (an <img>-embedded SVG freezes at the first sample, not the base -- see task-8-report.md)", () => {
   const out = svg();
-  const revealRects = out.match(/<clipPath id="rv\d+"><rect[^>]*>/g) || [];
-  assert.equal(revealRects.length, 14, "expected one reveal clip per row");
-  for (const tag of revealRects) {
-    assert.ok(!/width="0"/.test(tag), `reveal clip rect starts at zero width: ${tag}`);
-  }
+  const checked = assertAnimationsMatchBaseValues(out);
+  assert.ok(checked > 0, "expected at least one opacity/width animation to check -- a guard that checks nothing passes vacuously");
+  // Confirm the reveal-clip mechanism is actually gone, not merely passing
+  // the guard above by chance.
+  assert.ok(!out.includes('clip-path="url(#rv'), "a per-row reveal clip-path is still present");
 });

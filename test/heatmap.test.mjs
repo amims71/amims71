@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { THEME } from "../src/theme.mjs";
 import { GEOM, geometry, buildHeatmapSvg, GLIDER_DUR, columnPeaks, probeSchedule, touchOpacity } from "../src/heatmap.mjs";
-import { assertBalancedXml, assertNoHoles } from "./helpers.mjs";
+import { assertBalancedXml, assertNoHoles, assertAnimationsMatchBaseValues } from "./helpers.mjs";
 
 // 53 weeks x 7 days with a deterministic, varied distribution.
 function calendar(weekCount = 53) {
@@ -88,9 +88,19 @@ test("buildHeatmapSvg draws a five-swatch Less/More legend", () => {
   assert.equal((out.match(/class="heat-legend-swatch"/g) || []).length, 5);
 });
 
-test("buildHeatmapSvg staggers the cell fade-in", () => {
+// Superseded: cells no longer fade in at all (see the swapped-in shared
+// guard test below for why). This asserts the accurate replacement instead
+// of leaving the old assertion in place -- `/<animate attributeName="opacity"/`
+// still matches elsewhere in the SVG (the glider's cockpit-light blink), so
+// the original assertion would keep passing for the wrong reason even
+// though the cell fade-in it named is gone.
+test("buildHeatmapSvg draws heat-cells with no reveal animation", () => {
   const out = svg();
-  assert.match(out, /<animate attributeName="opacity"/);
+  const cellTags = out.match(/<rect class="heat-cell"[^>]*>/g) || [];
+  assert.ok(cellTags.length > 0, "no heat-cell rects emitted");
+  for (const tag of cellTags) {
+    assert.ok(tag.endsWith("/>"), `heat-cell rect should be self-closing, with no <animate> child: ${tag}`);
+  }
 });
 
 test("buildHeatmapSvg emits no numeric junk in coordinates", () => {
@@ -98,21 +108,22 @@ test("buildHeatmapSvg emits no numeric junk in coordinates", () => {
   assert.ok(!/(x|y|cx|cy|width|height)="(NaN|Infinity|-Infinity)"/.test(out));
 });
 
-// Regression: a renderer that does not execute SMIL (e.g. rsvg-convert, some
-// GitHub-side static renders) falls back to the base attribute values. The
-// brief's original cell markup used `opacity="0"` as the base with the reveal
-// driven entirely by `begin`, which makes the whole grid invisible on any
-// such renderer -- the exact bug that hit the hero card's key/value rows
-// (see task-5-report.md, Finding 1). The base value must be the final,
-// fully-visible state; the stagger must live inside the animation's own
-// timeline (keyTimes/values), not in `begin`.
-test("buildHeatmapSvg never emits a heat-cell rect with opacity=\"0\"", () => {
+// Superseded regression guard. The former per-cell reveal animation had a
+// base opacity of 1 (fully drawn), which was believed sufficient for any
+// renderer that "doesn't execute SMIL". That framing was wrong: Chrome, when
+// this SVG is embedded via <img> (exactly how GitHub renders README
+// images), DOES notice the SMIL but freezes the attribute at the
+// animation's first sample -- which was 0 -- and ignores the base value
+// entirely. The entire 365-cell grid rendered invisible on github.com/amims71
+// as a result (see task-8-report.md). The fix removes the reveal animation
+// outright rather than trying to pick a base value that happens to match a
+// first sample; the shared guard below is the generic replacement, covering
+// every opacity/width animation in the SVG, not just this one now-deleted
+// mechanism.
+test("buildHeatmapSvg's opacity/width animations agree with their base attribute values (an <img>-embedded SVG freezes at the first sample, not the base -- see task-8-report.md)", () => {
   const out = svg();
-  const cellTags = out.match(/<rect class="heat-cell"[^>]*>/g) || [];
-  assert.ok(cellTags.length > 0);
-  for (const tag of cellTags) {
-    assert.ok(!/opacity="0"/.test(tag), `heat-cell rect is invisible without SMIL: ${tag}`);
-  }
+  const checked = assertAnimationsMatchBaseValues(out);
+  assert.ok(checked > 0, "expected at least one opacity/width animation to check -- a guard that checks nothing passes vacuously");
 });
 
 // Regression: the 53-week window can open mid-month (e.g. the real GitHub
@@ -202,6 +213,22 @@ test("touchOpacity stays monotonic at the extremes of the lane", () => {
   }
 });
 
+// Found while verifying the task-8 fix-review's shared base/first-sample
+// guard: touchOpacity's own comment documents that a column at either end
+// of the lane collides two coincident keyframes at the boundary and
+// deliberately keeps the brighter sample so the pulse still flashes rather
+// than emitting a duplicate keyTime (which would kill the whole animation).
+// At exactly f=0 that collision lands ON the fixed opening/closing anchor
+// points themselves, so the animation's true first (and last) sample is 1,
+// not 0 -- the opposite of every interior column. This is pinned down here
+// because buildPeakMarkers' base opacity is derived from this exact value
+// (see its comment), not hardcoded, precisely so the two stay in sync.
+test("touchOpacity at the very edge of the lane opens and closes lit, not hidden", () => {
+  const o = touchOpacity(0);
+  assert.equal(o.values[0], 1);
+  assert.equal(o.values[o.values.length - 1], 1);
+});
+
 test("buildHeatmapSvg includes the glider and its dashed lane", () => {
   const out = svg();
   assert.match(out, /class="glider"/);
@@ -240,16 +267,29 @@ test("buildHeatmapSvg flashes amber markers only on bright peak days", () => {
 });
 
 // Correction 3: peak markers are meant to be invisible except during the
-// brief moment the beam tip crosses them. opacity="0" is their correct
-// resting state -- do not apply the static-safety fix used for heat-cells
-// here, or every marker would be permanently lit at rest.
-test("buildHeatmapSvg keeps peak markers hidden at rest (opacity=0 base)", () => {
+// brief moment the beam tip crosses them -- do not apply the static-safety
+// fix used for heat-cells here, or every marker would be permanently lit at
+// rest.
+//
+// Updated during the task-8 fix-review: this used to assert every marker's
+// base was the literal "0". That was true for every column except one --
+// see "touchOpacity at the very edge of the lane opens and closes lit, not
+// hidden" above -- so buildPeakMarkers now derives each marker's base
+// straight from its own animation's first sample instead of hardcoding "0".
+// The real invariant is "hidden at rest, except where the animation's own
+// first sample says otherwise", which is exactly "base equals first
+// sample" -- so this also doubles as a per-marker instance of the shared
+// guard, plus a sanity check that most markers are, in fact, still hidden.
+test("buildHeatmapSvg keeps peak-marker base opacity in sync with its own animation's first sample", () => {
   const out = svg();
-  const markerTags = out.match(/<rect class="peak-marker"[^>]*>/g) || [];
-  assert.ok(markerTags.length > 0, "no peak markers emitted");
-  for (const tag of markerTags) {
-    assert.match(tag, /opacity="0"/, `peak-marker should default to hidden: ${tag}`);
+  const markers = [
+    ...out.matchAll(/<rect class="peak-marker"[^>]*opacity="([^"]+)">\s*<animate attributeName="opacity"[^>]*values="([^"]+)"/g),
+  ];
+  assert.ok(markers.length > 0, "no peak markers emitted");
+  for (const [, base, values] of markers) {
+    assert.equal(base, values.split(";")[0], "peak-marker base opacity must match its own animation's first sample");
   }
+  assert.ok(markers.some(([, base]) => base === "0"), "expected at least one peak marker hidden at rest");
 });
 
 // Review finding 1: buildGlider's cockpit dot used a raw `fill="#ffffff"`
