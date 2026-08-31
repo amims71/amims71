@@ -89,7 +89,7 @@ export function buildCardSvg({ asciiRows, totalContributions, syncedAt }) {
   const ascii = asciiRows
     .map(
       (row, i) =>
-        `<text x="${PANEL_X + 14}" y="${(PANEL_Y + 26 + i * asciiLineH).toFixed(1)}" textLength="${LEFT_W - 28}" lengthAdjust="spacingAndGlyphs" class="ascii-row">${escapeXml(row)}</text>`
+        `<text x="${PANEL_X + 14}" y="${(PANEL_Y + 26 + i * asciiLineH).toFixed(1)}" textLength="${LEFT_W - 28}" lengthAdjust="spacingAndGlyphs" class="ascii-row" xml:space="preserve">${escapeXml(row)}</text>`
     )
     .join("");
 

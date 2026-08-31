@@ -78,6 +78,25 @@ test("buildCardSvg renders every ascii row with a fixed textLength", () => {
   assert.match(out, /lengthAdjust="spacingAndGlyphs"/);
 });
 
+// rsvg-convert (used for local/manual verification of the card render) does
+// not honour the CSS `white-space: pre` rule the .ascii-row class relies on
+// to preserve each row's leading indentation -- it collapses the leading
+// spaces and left-aligns every row, squashing the portrait into the left
+// third of its panel. Chrome (the real target, since GitHub embeds this SVG
+// via <img>) renders correctly either way, so this was invisible on
+// github.com, but it silently distorted every rsvg-based check made against
+// this project. xml:space="preserve" is the standard SVG/XML mechanism for
+// preserving whitespace and is universally supported, so add it alongside
+// (not instead of) the CSS rule -- belt and braces (see task-13-report.md).
+test("buildCardSvg's ascii-row text elements carry xml:space=\"preserve\" so whitespace survives renderers that ignore CSS white-space:pre", () => {
+  const out = svg();
+  const rowTags = out.match(/<text[^>]*class="ascii-row"[^>]*>/g) || [];
+  assert.equal(rowTags.length, 42, "expected 42 ascii-row <text> tags");
+  for (const tag of rowTags) {
+    assert.match(tag, /xml:space="preserve"/, `missing xml:space="preserve": ${tag}`);
+  }
+});
+
 test("buildCardSvg includes the terminal chrome and LIVE indicator", () => {
   const out = svg();
   assert.match(out, /amims71@github ~ % \.\/profile\.sh --live/);
